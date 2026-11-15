@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Fitness Calendar</title>
+  <meta name="description" content="Fit your Runna runs around your work and other Google Calendar events.">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏃</text></svg>">
+  <link rel="stylesheet" href="styles.css">
+  <script src="config.js"></script>
+  <script type="module" src="js/app.js"></script>
+</head>
+<body>
+  <header class="topbar">
+    <h1>🏃 Fitness Calendar</h1>
+    <div class="topbar-actions">
+      <span id="mode-badge" class="badge" hidden></span>
+      <button class="btn ghost open-settings" type="button">Settings</button>
+    </div>
+  </header>
+
+  <main id="main">
+    <section id="welcome" class="welcome">
+      <h2>Fit your Runna runs around your week</h2>
+      <p>Connect Google Calendar to see your Runna plan next to work and everything else. The app shows which runs clash and suggests better times. It keeps hard sessions apart and long runs on the weekend, and you decide what to move.</p>
+      <div class="welcome-actions">
+        <button id="connect" class="btn" type="button">Connect Google Calendar</button>
+        <button id="demo" class="btn ghost" type="button">Try with sample data</button>
+      </div>
+      <div id="setup-hint" class="note">
+        <strong>One-time setup:</strong> add a Google OAuth client ID in <button class="link open-settings" type="button">Settings</button>.
+        The README explains how to create one. Add <code id="origin"></code> as an authorised JavaScript origin.
+      </div>
+      <p class="fineprint">Everything runs in your browser. Your calendar data is read directly from Google and isn't sent anywhere else.</p>
+    </section>
+
+    <section id="app" hidden>
+      <div class="toolbar">
+        <div class="week-nav">
+          <button id="prev" class="btn ghost icon" type="button" aria-label="Previous week">‹</button>
+          <button id="this-week" class="btn ghost" type="button">This week</button>
+          <button id="next" class="btn ghost icon" type="button" aria-label="Next week">›</button>
+          <strong id="week-label"></strong>
+        </div>
+        <div class="toolbar-actions">
+          <button id="refresh" class="btn ghost" type="button">Refresh</button>
+          <button id="signout" class="btn ghost" type="button">Disconnect</button>
+        </div>
+      </div>
+
+      <div class="layout">
+        <aside class="side">
+          <section class="panel">
+            <h2>Suggested changes</h2>
+            <p id="summary" class="muted"></p>
+            <div id="changes" class="changes"></div>
+            <div class="panel-actions">
+              <button id="apply-all" class="btn" type="button">Apply changes</button>
+              <button id="copy" class="btn ghost" type="button">Copy list</button>
+              <button id="reset" class="btn ghost" type="button">Reset</button>
+            </div>
+          </section>
+          <section class="panel">
+            <h2>Calendars</h2>
+            <p class="muted">Choose which calendar holds your runs and which ones count as busy time.</p>
+            <ul id="calendar-list" class="calendar-list"></ul>
+          </section>
+        </aside>
+
+        <section class="panel grid-panel">
+          <div class="legend">
+            <span><i class="lg run"></i>Run fits</span>
+            <span><i class="lg clash"></i>Clash</span>
+            <span><i class="lg moved"></i>Suggested time</span>
+            <span><i class="lg ghost"></i>Original time</span>
+            <span><i class="lg busy"></i>Busy</span>
+          </div>
+          <div class="grid-scroll"><div id="grid" class="grid"></div></div>
+        </section>
+      </div>
+    </section>
+  </main>
+
+  <dialog id="settings">
+    <form id="settings-form">
+      <h2>Settings</h2>
+      <fieldset>
+        <legend>Google connection</legend>
+        <label>OAuth client ID
+          <input name="clientId" type="text" placeholder="1234-abc.apps.googleusercontent.com" autocomplete="off" spellcheck="false">
+        </label>
+      </fieldset>
+      <fieldset>
+        <legend>When you can run</legend>
+        <div class="row">
+          <label>Earliest start <input name="dayStart" type="time" required></label>
+          <label>Finish by <input name="dayEnd" type="time" required></label>
+          <label>Preferred time <input name="preferredTime" type="time" required></label>
+        </div>
+        <div class="row">
+          <label>Buffer around runs (min) <input name="bufferMin" type="number" min="0" max="180" step="5" required></label>
+          <label>Search ± days <input name="searchDays" type="number" min="0" max="6" required></label>
+          <label>Easy pace (min/km) <input name="paceMinPerKm" type="number" min="3" max="12" step="0.25" required></label>
+        </div>
+        <div class="field">Never run on <div id="blocked-days" class="days"></div></div>
+      </fieldset>
+      <fieldset>
+        <legend>Work hours</legend>
+        <label class="check"><input name="useWorkHours" type="checkbox"> Block out fixed work hours (if work isn't in your calendar)</label>
+        <div class="row">
+          <label>Start <input name="workStart" type="time"></label>
+          <label>End <input name="workEnd" type="time"></label>
+        </div>
+        <div class="field">Work days <div id="work-days" class="days"></div></div>
+        <label class="check"><input name="allDayBusy" type="checkbox"> Treat all-day events (trips, days off) as busy</label>
+      </fieldset>
+      <div class="dialog-actions">
+        <button id="settings-cancel" class="btn ghost" type="button">Cancel</button>
+        <button class="btn" type="submit">Save</button>
+      </div>
+    </form>
+  </dialog>
+
+  <div id="toasts" class="toasts" aria-live="polite"></div>
+</body>
+</html>
