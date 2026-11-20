@@ -56,7 +56,7 @@
 
       <div class="card summary">
         <p id="status"></p>
-        <button id="apply-all" class="btn" type="button">Move runs</button>
+        <button id="apply-all" class="btn" type="button">Review changes</button>
       </div>
 
       <div class="legend">
@@ -108,6 +108,19 @@
       <div class="dialog-actions">
         <button id="settings-cancel" class="btn ghost" type="button">Cancel</button>
         <button class="btn" type="submit">Save</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="review">
+    <form id="review-form">
+      <h2>Confirm changes</h2>
+      <p class="hint">These runs will be moved in your Google Calendar. Untick any you want to leave where they are.</p>
+      <ul id="review-list" class="review-list"></ul>
+      <p id="review-sample" class="hint" hidden>Sample data: only this page changes, not a real calendar.</p>
+      <div class="dialog-actions">
+        <button id="review-cancel" class="btn ghost" type="button">Cancel</button>
+        <button id="review-confirm" class="btn" type="submit">Confirm</button>
       </div>
     </form>
   </dialog>

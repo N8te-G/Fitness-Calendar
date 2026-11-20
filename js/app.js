@@ -172,19 +172,53 @@ async function applyMove(run, week) {
 
 const pendingMoves = () => state.weeks.flatMap((w) => w.runs.filter((r) => w.assign[r.id] !== r.day && !state.done[r.id]).map((r) => [r, w]));
 
-async function applyAll() {
-  const moves = pendingMoves();
-  let ok = 0;
-  for (const [r, w] of moves) if (await applyMove(r, w)) ok++;
-  if (ok) toast(`Moved ${ok} run${ok === 1 ? '' : 's'} in your calendar`, 'ok');
-  await (state.mode === 'google' ? load() : Promise.resolve(compute()));
+// Nothing is written to the calendar until the user confirms in this dialog.
+let reviewing = [];
+
+function openReview(moves) {
+  if (!moves.length) return;
+  reviewing = moves;
+  const list = $('#review-list');
+  list.replaceChildren(...moves.map(([r, w], i) => {
+    const to = w.assign[r.id];
+    return h('li', { class: `review-item r-${r.type}` },
+      h('label', {},
+        h('input', { type: 'checkbox', checked: true, 'data-i': i, onchange: updateReviewCount }),
+        h('span', { class: 'review-text' },
+          h('b', {}, r.ev.title),
+          h('span', {}, `${fmtDay.format(w.dates[r.day])} (${R.DAY_TYPES[w.days[r.day]]})`),
+          h('span', { class: 'arrow' }, `→ ${fmtDay.format(w.dates[to])} (${R.DAY_TYPES[w.days[to]]})`),
+        ),
+      ),
+    );
+  }));
+  $('#review-sample').hidden = state.mode !== 'sample';
+  updateReviewCount();
+  $('#review').showModal();
 }
 
-async function applyOne(r, w) {
-  if (await applyMove(r, w)) {
-    toast(`Moved ${r.ev.title} to ${fmtDay.format(w.dates[w.assign[r.id]])}`, 'ok');
-    state.mode === 'google' ? load() : compute();
-  }
+function selectedMoves() {
+  return [...document.querySelectorAll('#review-list input:checked')].map((c) => reviewing[+c.dataset.i]);
+}
+
+function updateReviewCount() {
+  const n = selectedMoves().length;
+  const btn = $('#review-confirm');
+  btn.disabled = !n;
+  btn.textContent = n ? `Confirm ${n} change${n === 1 ? '' : 's'}` : 'Nothing selected';
+}
+
+async function confirmReview(e) {
+  e.preventDefault();
+  const moves = selectedMoves();
+  const btn = $('#review-confirm');
+  btn.disabled = true;
+  btn.textContent = 'Moving…';
+  let ok = 0;
+  for (const [r, w] of moves) if (await applyMove(r, w)) ok++;
+  $('#review').close();
+  if (ok) toast(`Moved ${ok} run${ok === 1 ? '' : 's'} in your calendar`, 'ok');
+  await (state.mode === 'google' ? load() : Promise.resolve(compute()));
 }
 
 // ---------- rendering ----------
@@ -198,11 +232,11 @@ function render() {
 
   const moves = pendingMoves();
   $('#apply-all').disabled = !moves.length;
-  $('#apply-all').textContent = moves.length ? `Move ${moves.length} run${moves.length === 1 ? '' : 's'}` : 'Nothing to move';
+  $('#apply-all').textContent = moves.length ? `Review ${moves.length} change${moves.length === 1 ? '' : 's'}` : 'Nothing to move';
   const totalRuns = state.weeks.reduce((n, w) => n + w.runs.length, 0);
   $('#status').textContent = !totalRuns
     ? 'No Runna runs found. Check “Where are your runs?” in Settings.'
-    : moves.length ? `${moves.length} run${moves.length === 1 ? '' : 's'} should move to fit your rota.` : 'All runs fit your rota. 👍';
+    : moves.length ? `Suggested: move ${moves.length} run${moves.length === 1 ? '' : 's'} to fit your rota. Nothing changes until you confirm.` : 'All runs fit your rota. 👍';
 
   $('#weeks').replaceChildren(...state.weeks.map(renderWeek));
 }
@@ -270,7 +304,7 @@ function renderRunRow(w, r) {
       past ? null : h('label', { class: 'pin', title: 'Keep this run on its current day' },
         h('input', { type: 'checkbox', checked: !!state.pinned[r.id], onchange: (e) => { state.pinned[r.id] = e.target.checked; compute(); } }),
         ' Keep day'),
-      moving && !done ? h('button', { class: 'btn small', type: 'button', onclick: (e) => { e.target.disabled = true; applyOne(r, w); } }, 'Move') : null,
+      moving && !done ? h('button', { class: 'btn small', type: 'button', onclick: () => openReview([[r, w]]) }, 'Review') : null,
     ),
   );
 }
@@ -336,7 +370,9 @@ $('#prev').addEventListener('click', () => goWeek(R.addDays(state.startWeek, -7)
 $('#next').addEventListener('click', () => goWeek(R.addDays(state.startWeek, 7)));
 $('#today').addEventListener('click', () => goWeek(R.mondayOf(new Date())));
 $('#refresh').addEventListener('click', load);
-$('#apply-all').addEventListener('click', (e) => { e.target.disabled = true; applyAll(); });
+$('#apply-all').addEventListener('click', () => openReview(pendingMoves()));
+$('#review-form').addEventListener('submit', confirmReview);
+$('#review-cancel').addEventListener('click', () => $('#review').close());
 for (const b of document.querySelectorAll('.open-settings')) b.addEventListener('click', openSettings);
 $('#settings-form').addEventListener('submit', saveSettings);
 $('#settings-cancel').addEventListener('click', () => $('#settings').close());

@@ -15,6 +15,7 @@ Moves your Runna runs in Google Calendar so they fit your shift rota.
 - There's always a rest day between runs, including from Sunday into Monday.
 - Runs stay as close to Runna's day as possible and keep their time of day. Only the date changes.
 - Runs on days that have already passed are never moved, and nothing is moved into the past.
+- Nothing changes in your calendar until you confirm. **Review changes** lists every suggested move, and you can untick any before pressing **Confirm**.
 - Races stay where they are. Tick **Keep day** to pin any other run.
 - A day with no `Work…` event is a day off. Shift names can be changed in Settings.
 
