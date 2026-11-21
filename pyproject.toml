@@ -1,0 +1,27 @@
+[project]
+name = "garmin-health-mcp"
+version = "0.1.0"
+description = "Personal MCP server that lets Claude read your Garmin Connect data and tell you when you're off your normal."
+requires-python = ">=3.11"
+dependencies = [
+    "garminconnect>=0.3.20,<0.4",
+    "mcp>=2.3,<3",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+
+[project.scripts]
+garmin-health-mcp = "garmin_health.server:main"
+garmin-health-login = "garmin_health.login:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
