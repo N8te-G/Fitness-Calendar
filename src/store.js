@@ -13,10 +13,11 @@ import { mockMetrics } from "./mock.js";
 import { vapidKeys, sendPush, localNow, isDue } from "./push.js";
 
 const HISTORY_DAYS = BASELINE_DAYS + 30; // enough for a full baseline plus a month of results
-const CHUNK_DAYS = 28;
+// Garmin rejects ranges over 28 days on some endpoints (stress); 27 + 1 overlap day = 28.
+const CHUNK_DAYS = 27;
 const RESYNC_MINUTES = 30;
 // Bump when the way Garmin data is read changes, so stored history is re-downloaded.
-const EXTRACT_VERSION = 4;
+const EXTRACT_VERSION = 5;
 const RECENT_REFETCH_DAYS = 3; // Garmin fills in last night's data during the morning
 
 
