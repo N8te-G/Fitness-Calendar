@@ -26,7 +26,6 @@ export function mockMetrics(start, end) {
       bbCharged: Math.round(62 + n() * 16 - sick * 12),
       stress: Math.round(27 + n() * 8 + sick * 5),
       spo2: Math.round(96 + n() * 1.2 - sick * 1.5),
-      skinTemp: Math.round((n() * 0.25 + sick * 0.45) * 100) / 100,
     };
   }
   return days;

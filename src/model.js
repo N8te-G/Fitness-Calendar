@@ -10,7 +10,6 @@
 export const METRICS = {
   hrv: { label: "Overnight HRV", unit: "ms", bad: -1, weight: 0.5, floor: 3, relFloor: 0.07, digits: 0 },
   rhr: { label: "Resting heart rate", unit: "bpm", bad: 1, weight: 0.35, floor: 2, digits: 0 },
-  skinTemp: { label: "Skin temperature change", unit: "°C", bad: 1, weight: 0.3, floor: 0.2, digits: 1 },
   resp: { label: "Sleep breathing rate", unit: "brpm", bad: 1, weight: 0.25, floor: 0.4, digits: 1 },
   spo2: { label: "Sleep SpO2", unit: "%", bad: -1, weight: 0.15, floor: 1, digits: 0 },
   sleepScore: { label: "Sleep score", unit: "", bad: -1, weight: 0.15, floor: 4, digits: 0 },

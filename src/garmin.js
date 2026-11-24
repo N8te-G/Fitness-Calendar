@@ -96,7 +96,7 @@ export class Garmin {
   }
 }
 
-// ---------- SpO2 and skin temperature ----------
+// ---------- SpO2 ----------
 
 const SPO2_KEYS = [
   "averageSpO2Value", "avgSleepSpO2", "averageSleepSpO2", "avgSleepSpo2", "sleepAverageSpO2",
@@ -106,19 +106,6 @@ const SPO2_KEYS = [
 export function findSpo2(raw) {
   const v = deepFind(raw, SPO2_KEYS);
   return v != null && v > 50 && v <= 100 ? v : null;
-}
-
-/** Overnight skin-temperature change in °C, if Garmin includes one for this watch. */
-export function findSkinTemp(obj) {
-  let best = null;
-  walk(obj, 4, (key, value) => {
-    if (typeof value !== "number" || !/skin.?temp/i.test(key)) return;
-    const isDeviation = /dev|change|delta|diff/i.test(key);
-    const isF = /f(ahrenheit)?$/i.test(key) && !/c(elsius)?$/i.test(key);
-    const c = isF ? value / 1.8 : value; // deviations convert by scale only
-    if (isDeviation && Math.abs(c) < 5 && (best == null || !best.dev)) best = { v: c, dev: true };
-  });
-  return best ? Math.round(best.v * 100) / 100 : null;
 }
 
 function deepFind(obj, keys, depth = 4) {
@@ -181,7 +168,6 @@ export function extract(raw) {
     set(d, "resp", num(dto.averageRespirationValue ?? dto.avgSleepRespiration ?? dto.averageRespiration ?? s.averageRespirationValue));
     set(d, "rhr", num(s.restingHeartRate ?? dto.restingHeartRate));
     set(d, "sleepSeconds", num(dto.sleepTimeSeconds ?? dto.totalSleepSeconds));
-    set(d, "skinTemp", findSkinTemp(s));
     set(d, "spo2", findSpo2(s));
   }
 
@@ -205,7 +191,6 @@ export function extract(raw) {
     if (st != null && st >= 0) set(d, "stress", st);
     set(d, "bbCharged", num(s.bodyBatteryChargedValue ?? s.values?.bodyBatteryChargedValue));
     set(d, "steps", num(s.totalSteps ?? s.values?.totalSteps));
-    set(d, "skinTemp", findSkinTemp(s));
   }
   return days;
 }
