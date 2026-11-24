@@ -135,7 +135,10 @@ export class Store extends DurableObject {
 
     if (path === "/reminder/status") {
       const sub = await storage.get(key);
-      return { publicKey: keys.publicKey, reminder: sub ? { time: sub.time, tz: sub.tz } : null };
+      return {
+        publicKey: keys.publicKey,
+        reminder: sub ? { time: sub.time, tz: sub.tz, lastTest: sub.lastTest || null, lastReceived: sub.lastReceived || null } : null,
+      };
     }
     if (path === "/reminder/save") {
       const time = String(body.time || "");
@@ -162,9 +165,18 @@ export class Store extends DurableObject {
     if (path === "/reminder/test") {
       const sub = await storage.get(key);
       if (!sub) throw httpError(404, "no_reminder", "Turn the reminder on first.");
-      const status = await sendPush(keys, sub.endpoint, sub.origin);
-      if (status >= 400) throw httpError(502, "push", `The browser's push service refused the message (${status}).`);
-      return { sent: true };
+      const { status, detail } = await sendPush(keys, sub.endpoint, sub.origin);
+      await storage.put(key, { ...sub, lastTest: { at: Date.now(), status } });
+      if (status >= 400) {
+        throw httpError(502, "push", `Google's push service refused the message (${status})${detail ? `: ${detail}` : ""}.`);
+      }
+      return { sent: true, status, host: new URL(sub.endpoint).host };
+    }
+    if (path === "/reminder/received") {
+      // The phone's service worker reports that a push arrived (and any error showing it).
+      const sub = await storage.get(key);
+      if (sub) await storage.put(key, { ...sub, lastReceived: { at: Date.now(), error: String(body.error || "").slice(0, 300) } });
+      return { ok: true };
     }
     throw httpError(404, "not_found", "Unknown reminder route.");
   }
@@ -182,7 +194,7 @@ export class Store extends DurableObject {
         await storage.put(key, { ...sub, lastSentDate: now.date }); // already checked in today
         continue;
       }
-      const status = await sendPush(keys, sub.endpoint, sub.origin).catch(() => 0);
+      const { status } = await sendPush(keys, sub.endpoint, sub.origin).catch(() => ({ status: 0 }));
       if (status === 404 || status === 410) await storage.delete(key); // phone unsubscribed
       else if (status >= 200 && status < 300) {
         await storage.put(key, { ...sub, lastSentDate: now.date });

@@ -379,10 +379,26 @@ function b64ToBytes(s) {
 
 const post = (path, body) => api(path, { method: "POST", headers: HEADERS, body: JSON.stringify(body) });
 
+const clock = (ms) => new Date(ms).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+
 function showReminder(reminder) {
   $("reminder-on").textContent = reminder ? "Save time" : "Turn on";
   $("reminder-off").hidden = !reminder;
   $("reminder-test").hidden = !reminder;
+  $("reminder-sample").hidden = !reminder;
+  const diag = $("reminder-diag");
+  const t = reminder?.lastTest, r = reminder?.lastReceived;
+  if (t || r) {
+    const parts = [];
+    if (t) parts.push(`Last test sent ${clock(t.at)} (push service replied ${t.status})`);
+    if (r && (!t || r.at >= t.at - 5000)) {
+      parts.push(`reached this phone ${clock(r.at)}${r.error ? `, but showing it failed: ${r.error}` : ""}`);
+    } else if (t) {
+      parts.push("not received by this phone yet");
+    }
+    diag.textContent = parts.join(" · ") + ".";
+    diag.hidden = false;
+  } else diag.hidden = true;
   $("reminder-state").textContent = reminder ? `On · ${reminder.time} each day` : "Off";
   if (reminder) $("reminder-time").value = reminder.time;
 }
@@ -438,10 +454,37 @@ $("reminder-test").addEventListener("click", async () => {
   try {
     const sub = await swReg?.pushManager.getSubscription();
     if (!sub) return showReminder(null);
-    await post("/api/reminder/test", { endpoint: sub.endpoint });
-    msg.textContent = "Test sent. It should appear within a few seconds. If it doesn't, check that Chrome is allowed to show notifications in Android settings.";
+    const res = await post("/api/reminder/test", { endpoint: sub.endpoint });
+    msg.textContent = `Test sent via ${res.host} (accepted, ${res.status}). Checking whether it reaches this phone…`;
+    // Give the phone a moment to report back, then show what happened.
+    for (const wait of [3000, 5000, 7000]) {
+      await new Promise((r) => setTimeout(r, wait));
+      const { reminder } = await post("/api/reminder/status", { endpoint: sub.endpoint });
+      showReminder(reminder);
+      if (reminder?.lastReceived && reminder.lastReceived.at >= reminder.lastTest.at - 5000) {
+        msg.textContent = reminder.lastReceived.error ? "The push arrived but the notification couldn't be shown." : "The push reached this phone.";
+        return;
+      }
+    }
+    msg.textContent = "The push service accepted the test, but this phone hasn't reported receiving it after 15 seconds.";
   } catch (err) {
     msg.textContent = `Test failed: ${err.message}`;
+  }
+});
+
+$("reminder-sample").addEventListener("click", async () => {
+  const msg = $("reminder-msg");
+  try {
+    swReg ||= await navigator.serviceWorker.ready;
+    await swReg.showNotification("Wellness Watch sample", {
+      body: "If you can see this, notifications display on this phone.",
+      icon: "/icon-192.png",
+      badge: "/badge-96.png",
+      tag: "sample",
+    });
+    msg.textContent = "Sample shown. Did it appear in your notifications?";
+  } catch (err) {
+    msg.textContent = `This phone wouldn't show the sample: ${err.message}`;
   }
 });
 

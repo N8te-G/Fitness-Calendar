@@ -21,7 +21,7 @@ export default {
         }
       }
       const route = url.pathname.slice(4); // "/state", "/checkin", "/reminder/..."
-      const routes = ["/state", "/checkin", "/reminder/key", "/reminder/status", "/reminder/save", "/reminder/delete", "/reminder/test"];
+      const routes = ["/state", "/checkin", "/reminder/key", "/reminder/status", "/reminder/save", "/reminder/delete", "/reminder/test", "/reminder/received"];
       if (!routes.includes(route)) throw new HttpError(404, "not_found", "Unknown API route.");
       const forwarded = new Request(`https://store${route}${url.search}`, request);
       forwarded.headers.set("X-App-Origin", url.origin);

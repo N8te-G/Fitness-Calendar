@@ -7,6 +7,23 @@ const today = () => {
 self.addEventListener("install", () => self.skipWaiting());
 self.addEventListener("activate", (e) => e.waitUntil(self.clients.claim()));
 
+// Tell the app a push arrived, so the reminder panel can show it reached this phone.
+async function report(error) {
+  try {
+    const sub = await self.registration.pushManager.getSubscription();
+    if (!sub) return;
+    await fetch("/api/reminder/received", {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json", "X-Requested-With": "wellness-watch" },
+      body: JSON.stringify({ endpoint: sub.endpoint, error: error || "" }),
+      signal: AbortSignal.timeout(4000),
+    });
+  } catch {
+    // Reporting is best-effort.
+  }
+}
+
 self.addEventListener("push", (event) => {
   event.waitUntil((async () => {
     let body = "How do you feel today? It takes 10 seconds.";
@@ -23,14 +40,22 @@ self.addEventListener("push", (event) => {
     } catch {
       // Offline or logged out: plain reminder.
     }
-    await self.registration.showNotification("Wellness Watch check-in", {
-      body,
-      tag: "checkin",
-      renotify: true,
-      icon: "/icon-192.png",
-      badge: "/badge-96.png",
-      data: { url: "/#checkin" },
-    });
+    let error = "";
+    try {
+      await self.registration.showNotification("Wellness Watch check-in", {
+        body,
+        tag: "checkin",
+        renotify: true,
+        icon: "/icon-192.png",
+        badge: "/badge-96.png",
+        data: { url: "/#checkin" },
+      });
+    } catch (err) {
+      error = err.message || String(err);
+      // Last resort: the plainest possible notification.
+      await self.registration.showNotification("Wellness Watch check-in", { body }).catch(() => {});
+    }
+    await report(error);
   })());
 });
 

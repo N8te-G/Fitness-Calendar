@@ -12,7 +12,7 @@ assert.equal(Buffer.from(keys.publicKey, "base64url").length, 65, "uncompressed 
 
 let captured;
 globalThis.fetch = async (url, init) => { captured = { url, init }; return new Response(null, { status: 201 }); };
-const status = await sendPush(keys, "https://fcm.googleapis.com/fcm/send/abc123", "https://wellness-watch.example.workers.dev");
+const { status } = await sendPush(keys, "https://fcm.googleapis.com/fcm/send/abc123", "https://wellness-watch.example.workers.dev");
 assert.equal(status, 201);
 assert.equal(captured.init.method, "POST");
 assert.equal(captured.init.headers.TTL, String(6 * 3600));

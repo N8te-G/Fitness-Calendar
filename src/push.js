@@ -20,7 +20,7 @@ export async function vapidKeys(storage) {
   return keys;
 }
 
-/** Send an empty push. Returns the HTTP status (404/410 mean the subscription is gone). */
+/** Send an empty push. Returns { status, detail }; 404/410 mean the subscription is gone. */
 export async function sendPush(keys, endpoint, contact) {
   const aud = new URL(endpoint).origin;
   const header = b64urlJson({ typ: "JWT", alg: "ES256" });
@@ -36,7 +36,8 @@ export async function sendPush(keys, endpoint, contact) {
       "Content-Length": "0",
     },
   });
-  return res.status;
+  const detail = res.ok ? "" : (await res.text().catch(() => "")).slice(0, 300);
+  return { status: res.status, detail };
 }
 
 /** Local date (YYYY-MM-DD) and minutes past midnight in a time zone. */
