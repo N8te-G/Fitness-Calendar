@@ -16,7 +16,7 @@ const HISTORY_DAYS = BASELINE_DAYS + 30; // enough for a full baseline plus a mo
 const CHUNK_DAYS = 28;
 const RESYNC_MINUTES = 30;
 // Bump when the way Garmin data is read changes, so stored history is re-downloaded.
-const EXTRACT_VERSION = 3;
+const EXTRACT_VERSION = 4;
 const RECENT_REFETCH_DAYS = 3; // Garmin fills in last night's data during the morning
 
 
@@ -82,9 +82,13 @@ export class Store extends DurableObject {
     let fields = meta.fields || {};
     for (let start = from; start <= today; start = addDays(start, CHUNK_DAYS)) {
       const end = minDate(addDays(start, CHUNK_DAYS - 1), today);
+      // Fetch from the day before, so the first night's falling-asleep reading is included.
+      const fetchFrom = addDays(start, -1);
       let result;
       try {
-        result = garmin ? await garmin.metricsFor(start, end) : { days: mockMetrics(start, end), errors: {} };
+        result = garmin ? await garmin.metricsFor(fetchFrom, end) : { days: mockMetrics(start, end), errors: {} };
+        // The extra day is only there for its readings; don't store its partial figures.
+        delete result.days[fetchFrom];
       } catch (err) {
         if (err instanceof GarminError && (err.code === "garmin_auth" || err.code === "no_key")) throw err;
         errors[`${start}…${end}`] = err.message;
@@ -92,9 +96,14 @@ export class Store extends DurableObject {
       }
       Object.assign(errors, result.errors);
       if (result.fields) fields = { ...fields, ...nonEmpty(result.fields) };
+      // Merge with what's stored: a figure that needs the previous day's data (like the
+      // overnight Body Battery change on a chunk's first day) keeps its earlier value.
+      const keys = Object.keys(result.days).map((d) => `day:${d}`);
+      const existing = keys.length ? await storage.get(keys) : new Map();
       const puts = {};
       for (const [date, metrics] of Object.entries(result.days)) {
-        puts[`day:${date}`] = metrics;
+        const before = current ? existing.get(`day:${date}`) || {} : {};
+        puts[`day:${date}`] = { ...before, ...metrics };
         gotAny = true;
       }
       if (Object.keys(puts).length) await storage.put(puts);
