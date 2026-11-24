@@ -4,7 +4,7 @@ A private web app that watches your Garmin data for early signs of illness.
 
 - **Baseline:** for each metric, the median of your previous 60 days, with a robust normal range (±1 SD).
 - **Daily score:** last night's overnight HRV (weighted most), resting heart rate, sleep breathing rate,
-  sleep SpO2, sleep score, Body Battery recharge and stress are compared with your baseline. Deviations under half an
+  skin temperature change, sleep SpO2, sleep score, overnight Body Battery charge and stress are compared with your baseline. Deviations under half an
   SD are ignored as noise; two days off in a row add to the score.
 - **Daily check-in:** how you feel (1–5), symptoms and a note. These add to the score, and days you were
   unwell are left out of future baselines.

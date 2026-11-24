@@ -213,7 +213,9 @@ const fmtNum = (v, digits) => v.toFixed(digits).replace(/^-(0\.?0*)$/, "$1");
 
 function renderBaseline() {
   const d = todayEntry();
-  const rows = Object.entries(state.metrics).map(([key, m]) => {
+  // Hide metrics this watch has never sent; the Data check still lists them.
+  const sent = (key) => state.days.some((x) => typeof x.metrics?.[key] === "number");
+  const rows = Object.entries(state.metrics).filter(([key]) => sent(key)).map(([key, m]) => {
     const e = d.z?.[key] || {};
     const has = e.median != null;
     const range = has ? `${fmtNum(e.median - e.sd, m.digits)} to ${fmtNum(e.median + e.sd, m.digits)}` : null;
@@ -366,5 +368,178 @@ $("checkin-form").addEventListener("submit", async (e) => {
   }
 });
 
+// ---------- morning reminder ----------
+const pushSupported = "serviceWorker" in navigator && "PushManager" in window && "Notification" in window;
+let swReg = null;
+
+function b64ToBytes(s) {
+  const b = atob(s.replace(/-/g, "+").replace(/_/g, "/") + "=".repeat((4 - (s.length % 4)) % 4));
+  return Uint8Array.from(b, (c) => c.charCodeAt(0));
+}
+
+const subKeys = (sub) => {
+  const j = sub.toJSON();
+  return { endpoint: j.endpoint, p256dh: j.keys?.p256dh, auth: j.keys?.auth };
+};
+
+const post = (path, body) => api(path, { method: "POST", headers: HEADERS, body: JSON.stringify(body) });
+
+const clock = (ms) => new Date(ms).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+
+function showReminder(reminder) {
+  $("reminder-on").textContent = reminder ? "Save time" : "Turn on";
+  $("reminder-off").hidden = !reminder;
+  $("reminder-test").hidden = !reminder;
+  $("reminder-sample").hidden = !reminder;
+  const diag = $("reminder-diag");
+  const t = reminder?.lastTest, r = reminder?.lastReceived;
+  if (t || r) {
+    const parts = [];
+    if (t) parts.push(`Last test sent ${clock(t.at)} (${t.encrypted ? "encrypted" : "empty"}, push service replied ${t.status})`);
+    if (r && (!t || r.at >= t.at - 5000)) {
+      parts.push(`reached this phone ${clock(r.at)}${r.error ? `, but showing it failed: ${r.error}` : ""}`);
+    } else if (t) {
+      parts.push("not received by this phone yet");
+    }
+    diag.textContent = parts.join(" · ") + ".";
+    diag.hidden = false;
+  } else diag.hidden = true;
+  $("reminder-state").textContent = reminder ? `On · ${reminder.time} each day` : "Off";
+  if (reminder) $("reminder-time").value = reminder.time;
+}
+
+let swVersion = null;
+let lastPushSeen = null;
+if ("serviceWorker" in navigator) {
+  navigator.serviceWorker.addEventListener("message", (e) => {
+    if (e.data?.type === "version") swVersion = e.data.version;
+    if (e.data?.type === "push") {
+      lastPushSeen = e.data;
+      $("reminder-msg").textContent = `A push just arrived on this phone (${e.data.encrypted ? "encrypted" : "empty"})${e.data.error ? `, but showing it failed: ${e.data.error}` : ""}.`;
+    }
+    showVersion();
+  });
+}
+
+function showVersion() {
+  const diag = $("reminder-diag");
+  const tag = ` Notification code v${swVersion ?? "?"}.`;
+  diag.textContent = diag.textContent.replace(/ Notification code v\S+\.$/, "") + tag;
+  diag.hidden = false;
+}
+
+async function initReminder() {
+  if (!pushSupported) {
+    $("reminder-text").textContent = "This browser can't receive notifications. On Android, open the app in Chrome.";
+    $("reminder-on").disabled = true;
+    return;
+  }
+  try {
+    swReg = await navigator.serviceWorker.register("/sw.js", { updateViaCache: "none" });
+    swReg.update().catch(() => {});
+    navigator.serviceWorker.ready.then((r) => r.active?.postMessage("version"));
+    const sub = await swReg.pushManager.getSubscription();
+    if (!sub) return showReminder(null);
+    let { reminder } = await post("/api/reminder/status", { endpoint: sub.endpoint });
+    if (reminder && !reminder.hasKeys) {
+      // Older reminders were saved without the phone's encryption keys: add them.
+      const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+      reminder = { ...reminder, ...(await post("/api/reminder/save", { ...subKeys(sub), time: reminder.time, tz })).reminder, hasKeys: true };
+    }
+    showReminder(reminder);
+  } catch (err) {
+    $("reminder-msg").textContent = `Reminder settings unavailable: ${err.message}`;
+  }
+}
+
+$("reminder-on").addEventListener("click", async () => {
+  const msg = $("reminder-msg");
+  msg.textContent = "";
+  try {
+    if (Notification.permission === "denied") {
+      msg.textContent = "Notifications are blocked for this site. Allow them in Chrome's site settings, then try again.";
+      return;
+    }
+    if ((await Notification.requestPermission()) !== "granted") {
+      msg.textContent = "Notifications weren't allowed, so the reminder is off.";
+      return;
+    }
+    swReg ||= await navigator.serviceWorker.register("/sw.js");
+    await navigator.serviceWorker.ready;
+    let sub = await swReg.pushManager.getSubscription();
+    if (!sub) {
+      const { publicKey } = await api("/api/reminder/key");
+      sub = await swReg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64ToBytes(publicKey) });
+    }
+    const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+    const { reminder } = await post("/api/reminder/save", { ...subKeys(sub), time: $("reminder-time").value, tz });
+    showReminder(reminder);
+    msg.textContent = `Reminder set for ${reminder.time}. It only arrives if you haven't checked in.`;
+  } catch (err) {
+    msg.textContent = `Couldn't turn on the reminder: ${err.message}`;
+  }
+});
+
+$("reminder-test").addEventListener("click", async () => {
+  const msg = $("reminder-msg");
+  try {
+    const sub = await swReg?.pushManager.getSubscription();
+    if (!sub) return showReminder(null);
+    const res = await post("/api/reminder/test", { endpoint: sub.endpoint });
+    msg.textContent = `Test sent via ${res.host} (accepted, ${res.status}). Checking whether it reaches this phone…`;
+    // Give the phone a moment to report back, then show what happened.
+    for (const wait of [3000, 5000, 7000]) {
+      await new Promise((r) => setTimeout(r, wait));
+      const { reminder } = await post("/api/reminder/status", { endpoint: sub.endpoint });
+      showReminder(reminder);
+      if (lastPushSeen && lastPushSeen.at >= reminder.lastTest.at - 5000) {
+        msg.textContent = `The push reached this phone${lastPushSeen.error ? `, but showing it failed: ${lastPushSeen.error}` : ""}.`;
+        showVersion();
+        return;
+      }
+      if (reminder?.lastReceived && reminder.lastReceived.at >= reminder.lastTest.at - 5000) {
+        msg.textContent = reminder.lastReceived.error ? "The push arrived but the notification couldn't be shown." : "The push reached this phone.";
+        return;
+      }
+    }
+    msg.textContent = "The push service accepted the test, but it hasn't arrived on this phone after 15 seconds.";
+    showVersion();
+  } catch (err) {
+    msg.textContent = `Test failed: ${err.message}`;
+  }
+});
+
+$("reminder-sample").addEventListener("click", async () => {
+  const msg = $("reminder-msg");
+  try {
+    swReg ||= await navigator.serviceWorker.ready;
+    await swReg.showNotification("Wellness Watch sample", {
+      body: "If you can see this, notifications display on this phone.",
+      icon: "/icon-192.png",
+      badge: "/badge-96.png",
+      tag: "sample",
+    });
+    msg.textContent = "Sample shown. Did it appear in your notifications?";
+  } catch (err) {
+    msg.textContent = `This phone wouldn't show the sample: ${err.message}`;
+  }
+});
+
+$("reminder-off").addEventListener("click", async () => {
+  const msg = $("reminder-msg");
+  try {
+    const sub = await swReg?.pushManager.getSubscription();
+    if (sub) {
+      await post("/api/reminder/delete", { endpoint: sub.endpoint });
+      await sub.unsubscribe();
+    }
+    showReminder(null);
+    msg.textContent = "Reminder turned off.";
+  } catch (err) {
+    msg.textContent = `Couldn't turn it off: ${err.message}`;
+  }
+});
+
 document.body.classList.add("no-state");
 load();
+initReminder();

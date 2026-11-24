@@ -96,7 +96,7 @@ export class Garmin {
   }
 }
 
-// ---------- SpO2 ----------
+// ---------- SpO2 and skin temperature ----------
 
 const SPO2_KEYS = [
   "averageSpO2Value", "avgSleepSpO2", "averageSleepSpO2", "avgSleepSpo2", "sleepAverageSpO2",
@@ -106,6 +106,25 @@ const SPO2_KEYS = [
 export function findSpo2(raw) {
   const v = deepFind(raw, SPO2_KEYS);
   return v != null && v > 50 && v <= 100 ? v : null;
+}
+
+/**
+ * Overnight skin-temperature change in °C, if Garmin includes one. Matches any
+ * numeric field whose name mentions skin temperature, preferring ones that are
+ * a change from baseline; absolute readings (around 30 °C) are ignored.
+ */
+export function findSkinTemp(obj) {
+  let best = null;
+  walk(obj, 5, (key, value) => {
+    const n = num(value);
+    if (n == null || !/skin.?temp/i.test(key)) return;
+    const fahrenheit = /(f|fahrenheit)$/i.test(key);
+    const c = fahrenheit ? n / 1.8 : n; // a change converts by scale only
+    if (Math.abs(c) >= 5) return; // an absolute temperature, not a change
+    const rank = /dev|change|delta|diff/i.test(key) ? 2 : 1;
+    if (!best || rank > best.rank) best = { v: c, rank };
+  });
+  return best ? Math.round(best.v * 100) / 100 : null;
 }
 
 function deepFind(obj, keys, depth = 4) {
@@ -135,7 +154,7 @@ function walk(obj, depth, visit) {
 }
 
 /** Field names (never values) in a response, for the in-app data check. */
-export function fieldNames(raw, limit = 80) {
+export function fieldNames(raw, limit = 400) {
   const names = new Set();
   walk(raw, 3, (k) => {
     if (!/^\d+$/.test(k)) names.add(k);
@@ -169,14 +188,29 @@ export function extract(raw) {
     set(d, "rhr", num(s.restingHeartRate ?? dto.restingHeartRate));
     set(d, "sleepSeconds", num(dto.sleepTimeSeconds ?? dto.totalSleepSeconds));
     set(d, "spo2", findSpo2(s));
+    set(d, "skinTemp", findSkinTemp(s));
+    // Overnight Body Battery gain, as shown on Garmin's sleep screen.
+    set(d, "bbOvernight", deepFind(s, ["bodyBatteryChange", "bodyBatteryChangeValue"]));
   }
 
+  const bbPoints = [];
   for (const b of rows(raw.bodyBattery)) {
-    set(dateOf(b), "bbCharged", num(b.charged ?? b.bodyBatteryChargedValue));
-    const values = (b.bodyBatteryValuesArray || [])
-      .map((v) => num(Array.isArray(v) ? v[1] : v?.value))
-      .filter((v) => v != null);
-    if (values.length) set(dateOf(b), "bbHigh", Math.max(...values));
+    // Whole-day charge: only used for completed days when no overnight figure exists.
+    set(dateOf(b), "bbDaily", num(b.charged ?? b.bodyBatteryChargedValue));
+    bbPoints.push(...bodyBatteryPoints(b));
+  }
+
+  // Overnight Body Battery change = level when you woke minus level when you fell asleep.
+  bbPoints.sort((a, b) => a[0] - b[0]);
+  for (const s of rows(raw.sleep, ["dailySleepDTOs", "sleepSummaries"])) {
+    const dto = s.dailySleepDTO || s;
+    const d = dateOf(dto) || dateOf(s);
+    const start = epochMs(dto.sleepStartTimestampGMT ?? s.sleepStartTimestampGMT);
+    const end = epochMs(dto.sleepEndTimestampGMT ?? s.sleepEndTimestampGMT);
+    if (!d || start == null || end == null || end <= start) continue;
+    const a = levelNear(bbPoints, start);
+    const b = levelNear(bbPoints, end);
+    if (a != null && b != null) set(d, "bbOvernight", b - a);
   }
 
   for (const s of rows(raw.stress)) {
@@ -189,10 +223,50 @@ export function extract(raw) {
     set(d, "rhr", num(s.heartRate?.restingValue ?? s.restingHeartRate ?? s.restingHeartRateValue ?? s.values?.restingHeartRate));
     const st = num(s.averageStressLevel ?? s.values?.averageStressLevel);
     if (st != null && st >= 0) set(d, "stress", st);
-    set(d, "bbCharged", num(s.bodyBatteryChargedValue ?? s.values?.bodyBatteryChargedValue));
+    set(d, "bbDaily", num(s.bodyBattery?.chargedValue ?? s.bodyBatteryChargedValue ?? s.values?.bodyBatteryChargedValue));
+    set(d, "skinTemp", findSkinTemp(s));
     set(d, "steps", num(s.totalSteps ?? s.values?.totalSteps));
   }
   return days;
+}
+
+/** [epochMs, level] pairs from a Body Battery report, using its descriptor list when present. */
+export function bodyBatteryPoints(report) {
+  const desc = report.bodyBatteryValueDescriptorDTOList || report.bodyBatteryValueDescriptorsDTOList || [];
+  const idx = (re, fallback) => {
+    const hit = desc.find((x) => re.test(x.bodyBatteryValueDescriptorKey || x.key || ""));
+    return hit ? Number(hit.bodyBatteryValueDescriptorIndex ?? hit.index) : fallback;
+  };
+  const ti = idx(/timestamp/i, 0);
+  const li = idx(/level|value$/i, -1);
+  const out = [];
+  for (const v of report.bodyBatteryValuesArray || []) {
+    if (!Array.isArray(v)) continue;
+    const t = epochMs(v[ti]);
+    // Without descriptors, Garmin's usual layout is [timestamp, status, level, version] or [timestamp, level].
+    const level = num(v[li >= 0 ? li : v.length >= 3 ? 2 : 1]);
+    if (t != null && level != null && level >= 0 && level <= 100) out.push([t, level]);
+  }
+  return out;
+}
+
+/** The level at the reading closest to time t, if one is within 45 minutes. */
+function levelNear(points, t) {
+  let best = null;
+  for (const [ts, level] of points) {
+    const gap = Math.abs(ts - t);
+    if (gap <= 45 * 60000 && (!best || gap < best.gap)) best = { gap, level };
+  }
+  return best ? best.level : null;
+}
+
+function epochMs(v) {
+  if (typeof v === "number" && Number.isFinite(v)) return v < 1e12 ? v * 1000 : v;
+  if (typeof v === "string" && v) {
+    const t = Date.parse(/[zZ]|[+-]\d\d:?\d\d$/.test(v) ? v : v + "Z"); // GMT strings may lack a zone
+    return Number.isNaN(t) ? null : t;
+  }
+  return null;
 }
 
 function rows(value, keys = []) {

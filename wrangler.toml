@@ -8,6 +8,10 @@ account_id = "e599a466796c0bdba13b42e404789d98"
 workers_dev = true
 preview_urls = false
 
+# Checks every 15 minutes whether a morning check-in reminder is due.
+[triggers]
+crons = ["*/15 * * * *"]
+
 [assets]
 directory = "./public"
 binding = "ASSETS"

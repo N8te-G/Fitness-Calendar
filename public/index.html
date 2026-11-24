@@ -10,6 +10,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Space+Grotesk:wght@500;600;700&display=swap">
 <link rel="stylesheet" href="styles.css">
+<link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23176b5b'/%3E%3Cpath d='M6 17h5l2.5-6 4 11 3-7H26' fill='none' stroke='white' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
 </head>
 <body>
@@ -28,7 +29,7 @@
 
   <section id="verdict" class="verdict" aria-live="polite"></section>
 
-  <section class="panel" id="checkin-panel" aria-labelledby="checkin-title">
+  <section class="panel" id="checkin" aria-labelledby="checkin-title">
     <div class="panel-head">
       <h2 id="checkin-title">How do you feel today?</h2>
       <label class="date-pick" for="checkin-date">
@@ -61,6 +62,25 @@
     </form>
   </section>
 
+  <section class="panel reminder" aria-labelledby="reminder-title">
+    <div class="panel-head">
+      <h2 id="reminder-title">Morning reminder</h2>
+      <span id="reminder-state" class="hint"></span>
+    </div>
+    <p class="reminder-text" id="reminder-text">Get a notification each morning if you haven't checked in yet.</p>
+    <div class="reminder-row">
+      <label for="reminder-time" class="time-label">Time
+        <input type="time" id="reminder-time" value="08:00" step="900">
+      </label>
+      <button type="button" class="primary" id="reminder-on">Turn on</button>
+      <button type="button" class="ghost" id="reminder-test" hidden>Send test</button>
+      <button type="button" class="ghost" id="reminder-off" hidden>Turn off</button>
+      <button type="button" class="ghost" id="reminder-sample" hidden>Show sample</button>
+    </div>
+    <p class="reminder-diag hint" id="reminder-diag" hidden></p>
+    <span id="reminder-msg" class="form-msg" role="status"></span>
+  </section>
+
   <section class="panel" aria-labelledby="baseline-title">
     <div class="panel-head">
       <h2 id="baseline-title">Last night vs your baseline</h2>
@@ -88,7 +108,7 @@
 
   <footer class="about">
     <h2>How it works</h2>
-    <p>Your baseline is the median of the previous 60 days for each metric. The normal range is about one standard deviation either side, measured robustly so one odd night doesn't move it. Every morning, last night's numbers are compared with that baseline. Overnight HRV counts most, then resting heart rate, sleep breathing rate, SpO2, sleep score, Body Battery recharge and stress. Metrics your watch doesn't record are simply left out. Signals that last two days in a row add to the score, and so does your check-in. Days you were unwell are left out of the baseline.</p>
+    <p>Your baseline is the median of the previous 60 days for each metric. The normal range is about one standard deviation either side, measured robustly so one odd night doesn't move it. Every morning, last night's numbers are compared with that baseline. Overnight HRV counts most, then resting heart rate, skin temperature change, sleep breathing rate, SpO2, sleep score, overnight Body Battery charge and stress. Metrics your watch doesn't record are simply left out. Signals that last two days in a row add to the score, and so does your check-in. Days you were unwell are left out of the baseline.</p>
     <p>This is an early-warning aid built on your own data, not a medical diagnosis. If you feel unwell, trust that over the score.</p>
   </footer>
 </main>

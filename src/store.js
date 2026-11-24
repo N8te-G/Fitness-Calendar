@@ -3,17 +3,21 @@
 //   checkin:YYYY-MM-DD  -> { feeling, symptoms, note, savedAt }
 //   meta                -> { lastSync, syncedFrom, syncedTo, errors, fields }
 //   token               -> cached Garmin bearer token
+//   vapid               -> push signing key pair
+//   push:<id>           -> { endpoint, p256dh, auth, time: "HH:MM", tz, origin, lastSentDate }
 
 import { DurableObject } from "cloudflare:workers";
 import { Garmin, GarminError } from "./garmin.js";
 import { assess, BASELINE_DAYS, METRICS, SYMPTOMS, LEVELS } from "./model.js";
 import { mockMetrics } from "./mock.js";
+import { vapidKeys, sendPush, localNow, isDue } from "./push.js";
 
 const HISTORY_DAYS = BASELINE_DAYS + 30; // enough for a full baseline plus a month of results
-const CHUNK_DAYS = 28;
+// Garmin rejects ranges over 28 days on some endpoints (stress); 27 + 1 overlap day = 28.
+const CHUNK_DAYS = 27;
 const RESYNC_MINUTES = 30;
 // Bump when the way Garmin data is read changes, so stored history is re-downloaded.
-const EXTRACT_VERSION = 2;
+const EXTRACT_VERSION = 5;
 const RECENT_REFETCH_DAYS = 3; // Garmin fills in last night's data during the morning
 
 
@@ -44,6 +48,8 @@ export class Store extends DurableObject {
         await this.ctx.storage.delete(`checkin:${date}`);
         return json(await this.state(url.searchParams.get("today") || date));
       }
+      if (url.pathname.startsWith("/reminder")) return json(await this.reminder(url.pathname, request));
+      if (url.pathname === "/cron" && request.method === "POST") return json(await this.sendDueReminders());
       return json({ error: "not_found", message: "Unknown route." }, 404);
     } catch (err) {
       return json({ error: err.code || "error", message: err.message }, err.status || 500);
@@ -77,9 +83,13 @@ export class Store extends DurableObject {
     let fields = meta.fields || {};
     for (let start = from; start <= today; start = addDays(start, CHUNK_DAYS)) {
       const end = minDate(addDays(start, CHUNK_DAYS - 1), today);
+      // Fetch from the day before, so the first night's falling-asleep reading is included.
+      const fetchFrom = addDays(start, -1);
       let result;
       try {
-        result = garmin ? await garmin.metricsFor(start, end) : { days: mockMetrics(start, end), errors: {} };
+        result = garmin ? await garmin.metricsFor(fetchFrom, end) : { days: mockMetrics(start, end), errors: {} };
+        // The extra day is only there for its readings; don't store its partial figures.
+        delete result.days[fetchFrom];
       } catch (err) {
         if (err instanceof GarminError && (err.code === "garmin_auth" || err.code === "no_key")) throw err;
         errors[`${start}…${end}`] = err.message;
@@ -87,9 +97,14 @@ export class Store extends DurableObject {
       }
       Object.assign(errors, result.errors);
       if (result.fields) fields = { ...fields, ...nonEmpty(result.fields) };
+      // Merge with what's stored: a figure that needs the previous day's data (like the
+      // overnight Body Battery change on a chunk's first day) keeps its earlier value.
+      const keys = Object.keys(result.days).map((d) => `day:${d}`);
+      const existing = keys.length ? await storage.get(keys) : new Map();
       const puts = {};
       for (const [date, metrics] of Object.entries(result.days)) {
-        puts[`day:${date}`] = metrics;
+        const before = current ? existing.get(`day:${date}`) || {} : {};
+        puts[`day:${date}`] = { ...before, ...metrics };
         gotAny = true;
       }
       if (Object.keys(puts).length) await storage.put(puts);
@@ -104,6 +119,108 @@ export class Store extends DurableObject {
       fields,
       version: EXTRACT_VERSION,
     });
+  }
+
+  // ---------- morning reminder ----------
+
+  async reminder(path, request) {
+    const storage = this.ctx.storage;
+    const keys = await vapidKeys(storage);
+    if (path === "/reminder/key") return { publicKey: keys.publicKey };
+    if (request.method !== "POST") throw httpError(405, "method", "Use POST.");
+    const body = await request.json().catch(() => ({}));
+    const endpoint = String(body.endpoint || "");
+    if (!/^https:\/\/[^\s]+$/.test(endpoint) || endpoint.length > 2000) throw httpError(400, "endpoint", "Bad push endpoint.");
+    const key = `push:${await sha(endpoint)}`;
+
+    if (path === "/reminder/status") {
+      const sub = await storage.get(key);
+      return {
+        publicKey: keys.publicKey,
+        reminder: sub
+          ? { time: sub.time, tz: sub.tz, hasKeys: !!(sub.p256dh && sub.auth), lastTest: sub.lastTest || null, lastReceived: sub.lastReceived || null }
+          : null,
+      };
+    }
+    if (path === "/reminder/save") {
+      const time = String(body.time || "");
+      if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(time)) throw httpError(400, "time", "Time must be HH:MM.");
+      const tz = String(body.tz || "UTC");
+      try {
+        localNow(tz);
+      } catch {
+        throw httpError(400, "tz", "Unknown time zone.");
+      }
+      const prev = await storage.get(key);
+      const origin = request.headers.get("X-App-Origin") || "https://example.invalid";
+      // If the reminder time today has already passed, don't fire straight away.
+      const now = localNow(tz);
+      const [h, m] = time.split(":").map(Number);
+      const lastSentDate = prev?.lastSentDate || (now.minutes >= h * 60 + m ? now.date : null);
+      const p256dh = typeof body.p256dh === "string" ? body.p256dh.slice(0, 200) : prev?.p256dh;
+      const auth = typeof body.auth === "string" ? body.auth.slice(0, 100) : prev?.auth;
+      await storage.put(key, { endpoint, p256dh, auth, time, tz, origin, lastSentDate });
+      return { reminder: { time, tz } };
+    }
+    if (path === "/reminder/delete") {
+      await storage.delete(key);
+      return { reminder: null };
+    }
+    if (path === "/reminder/test") {
+      const sub = await storage.get(key);
+      if (!sub) throw httpError(404, "no_reminder", "Turn the reminder on first.");
+      const { status, detail } = await sendPush(keys, sub, sub.origin, await this.reminderMessage(localNow(sub.tz).date, true));
+      await storage.put(key, { ...sub, lastTest: { at: Date.now(), status, encrypted: !!(sub.p256dh && sub.auth) } });
+      if (status >= 400) {
+        throw httpError(502, "push", `Google's push service refused the message (${status})${detail ? `: ${detail}` : ""}.`);
+      }
+      return { sent: true, status, host: new URL(sub.endpoint).host };
+    }
+    if (path === "/reminder/received") {
+      // The phone's service worker reports that a push arrived (and any error showing it).
+      const sub = await storage.get(key);
+      if (sub) await storage.put(key, { ...sub, lastReceived: { at: Date.now(), error: String(body.error || "").slice(0, 300) } });
+      return { ok: true };
+    }
+    throw httpError(404, "not_found", "Unknown reminder route.");
+  }
+
+  /** Notification text, including today's risk level when it isn't Normal. */
+  async reminderMessage(date, test) {
+    let body = "How do you feel today? It takes 10 seconds.";
+    try {
+      await this.sync(date, false).catch(() => {}); // pick up last night's data if it's arrived
+      const day = (await this.state(date)).days.find((d) => d.date === date);
+      const label = { watch: "Watch", elevated: "Elevated", high: "High" }[day?.level];
+      if (label) body = `Illness risk: ${label}. How do you feel today?`;
+    } catch {
+      // Plain reminder if the data can't be read.
+    }
+    return { title: test ? "Wellness Watch test" : "Wellness Watch check-in", body, url: "/#checkin" };
+  }
+
+  async sendDueReminders() {
+    const storage = this.ctx.storage;
+    const subs = await storage.list({ prefix: "push:" });
+    if (!subs.size) return { sent: 0 };
+    const keys = await vapidKeys(storage);
+    let sent = 0;
+    for (const [key, sub] of subs) {
+      const now = localNow(sub.tz);
+      if (!isDue(sub, now)) continue;
+      if (await storage.get(`checkin:${now.date}`)) {
+        await storage.put(key, { ...sub, lastSentDate: now.date }); // already checked in today
+        continue;
+      }
+      const message = await this.reminderMessage(now.date, false);
+      const { status } = await sendPush(keys, sub, sub.origin, message).catch(() => ({ status: 0 }));
+      if (status === 404 || status === 410) await storage.delete(key); // phone unsubscribed
+      else if (status >= 200 && status < 300) {
+        await storage.put(key, { ...sub, lastSentDate: now.date });
+        sent++;
+      }
+    }
+    return { sent };
   }
 
   async saveCheckin(body) {
@@ -128,7 +245,15 @@ export class Store extends DurableObject {
     const checkins = {};
     for (const [k, v] of checkMap) checkins[k.slice(8)] = v;
     const byDate = {};
-    for (const [k, v] of dayMap) byDate[k.slice(4)] = { ...v };
+    for (const [k, v] of dayMap) {
+      const date = k.slice(4);
+      const m = { ...v };
+      // Prefer the overnight charge. A whole-day total is only comparable for completed days:
+      // this morning's would count just the hours since midnight.
+      const bb = m.bbOvernight ?? (isDate(today) && date < today ? m.bbDaily : undefined);
+      if (bb != null) m.bbCharged = bb;
+      byDate[date] = m;
+    }
     for (const d of Object.keys(checkins)) byDate[d] ||= {};
     if (isDate(today)) byDate[today] ||= {};
 
@@ -147,6 +272,15 @@ export class Store extends DurableObject {
       mock: this.env.MOCK === "1",
     };
   }
+}
+
+function httpError(status, code, message) {
+  return Object.assign(new Error(message), { status, code });
+}
+
+async function sha(text) {
+  const d = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
+  return [...new Uint8Array(d)].slice(0, 16).map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
 function nonEmpty(obj) {

@@ -23,9 +23,10 @@ export function mockMetrics(start, end) {
       resp: Math.round((14.2 + n() * 0.6 + sick * 0.7) * 10) / 10,
       sleepScore: Math.round(78 + n() * 12 - sick * 8),
       sleepSeconds: Math.round((7.3 + n()) * 3600),
-      bbCharged: Math.round(62 + n() * 16 - sick * 12),
+      bbOvernight: Math.round(62 + n() * 16 - sick * 12),
       stress: Math.round(27 + n() * 8 + sick * 5),
       spo2: Math.round(96 + n() * 1.2 - sick * 1.5),
+      skinTemp: Math.round((n() * 0.25 + sick * 0.45) * 100) / 100,
     };
   }
   return days;
