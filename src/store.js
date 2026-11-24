@@ -4,7 +4,7 @@
 //   meta                -> { lastSync, syncedFrom, syncedTo, errors, fields }
 //   token               -> cached Garmin bearer token
 //   vapid               -> push signing key pair
-//   push:<id>           -> { endpoint, time: "HH:MM", tz, origin, lastSentDate }
+//   push:<id>           -> { endpoint, p256dh, auth, time: "HH:MM", tz, origin, lastSentDate }
 
 import { DurableObject } from "cloudflare:workers";
 import { Garmin, GarminError } from "./garmin.js";
@@ -137,7 +137,9 @@ export class Store extends DurableObject {
       const sub = await storage.get(key);
       return {
         publicKey: keys.publicKey,
-        reminder: sub ? { time: sub.time, tz: sub.tz, lastTest: sub.lastTest || null, lastReceived: sub.lastReceived || null } : null,
+        reminder: sub
+          ? { time: sub.time, tz: sub.tz, hasKeys: !!(sub.p256dh && sub.auth), lastTest: sub.lastTest || null, lastReceived: sub.lastReceived || null }
+          : null,
       };
     }
     if (path === "/reminder/save") {
@@ -155,7 +157,9 @@ export class Store extends DurableObject {
       const now = localNow(tz);
       const [h, m] = time.split(":").map(Number);
       const lastSentDate = prev?.lastSentDate || (now.minutes >= h * 60 + m ? now.date : null);
-      await storage.put(key, { endpoint, time, tz, origin, lastSentDate });
+      const p256dh = typeof body.p256dh === "string" ? body.p256dh.slice(0, 200) : prev?.p256dh;
+      const auth = typeof body.auth === "string" ? body.auth.slice(0, 100) : prev?.auth;
+      await storage.put(key, { endpoint, p256dh, auth, time, tz, origin, lastSentDate });
       return { reminder: { time, tz } };
     }
     if (path === "/reminder/delete") {
@@ -165,7 +169,7 @@ export class Store extends DurableObject {
     if (path === "/reminder/test") {
       const sub = await storage.get(key);
       if (!sub) throw httpError(404, "no_reminder", "Turn the reminder on first.");
-      const { status, detail } = await sendPush(keys, sub.endpoint, sub.origin);
+      const { status, detail } = await sendPush(keys, sub, sub.origin, await this.reminderMessage(localNow(sub.tz).date, true));
       await storage.put(key, { ...sub, lastTest: { at: Date.now(), status } });
       if (status >= 400) {
         throw httpError(502, "push", `Google's push service refused the message (${status})${detail ? `: ${detail}` : ""}.`);
@@ -181,6 +185,20 @@ export class Store extends DurableObject {
     throw httpError(404, "not_found", "Unknown reminder route.");
   }
 
+  /** Notification text, including today's risk level when it isn't Normal. */
+  async reminderMessage(date, test) {
+    let body = "How do you feel today? It takes 10 seconds.";
+    try {
+      await this.sync(date, false).catch(() => {}); // pick up last night's data if it's arrived
+      const day = (await this.state(date)).days.find((d) => d.date === date);
+      const label = { watch: "Watch", elevated: "Elevated", high: "High" }[day?.level];
+      if (label) body = `Illness risk: ${label}. How do you feel today?`;
+    } catch {
+      // Plain reminder if the data can't be read.
+    }
+    return { title: test ? "Wellness Watch test" : "Wellness Watch check-in", body, url: "/#checkin" };
+  }
+
   async sendDueReminders() {
     const storage = this.ctx.storage;
     const subs = await storage.list({ prefix: "push:" });
@@ -194,7 +212,8 @@ export class Store extends DurableObject {
         await storage.put(key, { ...sub, lastSentDate: now.date }); // already checked in today
         continue;
       }
-      const { status } = await sendPush(keys, sub.endpoint, sub.origin).catch(() => ({ status: 0 }));
+      const message = await this.reminderMessage(now.date, false);
+      const { status } = await sendPush(keys, sub, sub.origin, message).catch(() => ({ status: 0 }));
       if (status === 404 || status === 410) await storage.delete(key); // phone unsubscribed
       else if (status >= 200 && status < 300) {
         await storage.put(key, { ...sub, lastSentDate: now.date });

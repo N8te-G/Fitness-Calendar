@@ -377,6 +377,11 @@ function b64ToBytes(s) {
   return Uint8Array.from(b, (c) => c.charCodeAt(0));
 }
 
+const subKeys = (sub) => {
+  const j = sub.toJSON();
+  return { endpoint: j.endpoint, p256dh: j.keys?.p256dh, auth: j.keys?.auth };
+};
+
 const post = (path, body) => api(path, { method: "POST", headers: HEADERS, body: JSON.stringify(body) });
 
 const clock = (ms) => new Date(ms).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
@@ -414,7 +419,12 @@ async function initReminder() {
     swReg.update().catch(() => {});
     const sub = await swReg.pushManager.getSubscription();
     if (!sub) return showReminder(null);
-    const { reminder } = await post("/api/reminder/status", { endpoint: sub.endpoint });
+    let { reminder } = await post("/api/reminder/status", { endpoint: sub.endpoint });
+    if (reminder && !reminder.hasKeys) {
+      // Older reminders were saved without the phone's encryption keys: add them.
+      const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+      reminder = { ...reminder, ...(await post("/api/reminder/save", { ...subKeys(sub), time: reminder.time, tz })).reminder, hasKeys: true };
+    }
     showReminder(reminder);
   } catch (err) {
     $("reminder-msg").textContent = `Reminder settings unavailable: ${err.message}`;
@@ -441,7 +451,7 @@ $("reminder-on").addEventListener("click", async () => {
       sub = await swReg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64ToBytes(publicKey) });
     }
     const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
-    const { reminder } = await post("/api/reminder/save", { endpoint: sub.endpoint, time: $("reminder-time").value, tz });
+    const { reminder } = await post("/api/reminder/save", { ...subKeys(sub), time: $("reminder-time").value, tz });
     showReminder(reminder);
     msg.textContent = `Reminder set for ${reminder.time}. It only arrives if you haven't checked in.`;
   } catch (err) {

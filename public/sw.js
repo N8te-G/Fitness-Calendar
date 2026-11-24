@@ -26,8 +26,18 @@ async function report(error) {
 
 self.addEventListener("push", (event) => {
   event.waitUntil((async () => {
+    let title = "Wellness Watch check-in";
     let body = "How do you feel today? It takes 10 seconds.";
+    let message = null;
     try {
+      message = event.data ? event.data.json() : null;
+    } catch {
+      message = null;
+    }
+    if (message) {
+      title = message.title || title;
+      body = message.body || body;
+    } else try {
       // Uses the same login cookie as the app; if it has expired we fall back to the plain text.
       // Give up after 4 seconds so the reminder always shows promptly.
       const res = await fetch(`/api/state?today=${today()}`, { credentials: "include", signal: AbortSignal.timeout(4000) });
@@ -42,7 +52,7 @@ self.addEventListener("push", (event) => {
     }
     let error = "";
     try {
-      await self.registration.showNotification("Wellness Watch check-in", {
+      await self.registration.showNotification(title, {
         body,
         tag: "checkin",
         renotify: true,
@@ -53,7 +63,7 @@ self.addEventListener("push", (event) => {
     } catch (err) {
       error = err.message || String(err);
       // Last resort: the plainest possible notification.
-      await self.registration.showNotification("Wellness Watch check-in", { body }).catch(() => {});
+      await self.registration.showNotification(title, { body }).catch(() => {});
     }
     await report(error);
   })());
