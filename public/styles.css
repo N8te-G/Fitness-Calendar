@@ -206,6 +206,23 @@ textarea {
 .chart svg { display: block; width: 100%; height: auto; overflow: visible; }
 .chart text { fill: var(--muted); font-size: 10px; font-family: var(--font-body); }
 
+/* Track record */
+.record-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 8px; }
+.record-stat { background: var(--bg); border-radius: 10px; padding: 10px 12px; }
+.record-stat .value { font: 600 1.3rem/1.2 var(--font-display); }
+.record-stat .label { font-size: 0.75rem; color: var(--muted); }
+.record p { margin: 0; font-size: 0.9rem; }
+.record { display: grid; gap: 12px; }
+.weights { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+.weights th { text-align: left; font-weight: 600; color: var(--muted); font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.05em; padding: 4px 0; }
+.weights th:not(:first-child), .weights td:not(:first-child) { text-align: right; padding-left: 14px; white-space: nowrap; }
+.sub-head { font: 600 0.85rem var(--font-body); margin: 4px 0 -4px; }
+.weights td { padding: 5px 0; border-top: 1px solid var(--line); }
+.up { color: var(--elevated); font-weight: 600; }
+.down { color: var(--muted); }
+.episodes { display: grid; gap: 4px; font-size: 0.85rem; }
+.episodes div { display: flex; justify-content: space-between; gap: 8px; border-top: 1px solid var(--line); padding-top: 5px; }
+
 /* History */
 .history { display: grid; }
 .hrow {
