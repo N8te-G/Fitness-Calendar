@@ -89,6 +89,8 @@ h1 { font: 700 1.35rem/1.1 var(--font-display); margin: 0; letter-spacing: -0.01
 .notice ol { margin: 6px 0; padding-left: 20px; }
 .notice code { background: var(--sunk); padding: 1px 5px; border-radius: 4px; font-size: 0.85em; overflow-wrap: anywhere; }
 
+.no-state .verdict, .no-state .panel, .no-state .about { display: none; }
+
 /* Verdict */
 .verdict {
   --lc: var(--building);

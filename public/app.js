@@ -41,7 +41,8 @@ async function load(fresh = false) {
   try {
     state = await api(`/api/state?today=${today}${fresh ? "&fresh=1" : ""}`);
     $("notice").hidden = true;
-    showSyncNotice();
+    if (state.syncError) showError(state.syncError);
+    else showSyncNotice();
     render();
   } catch (err) {
     showError(err);
@@ -61,7 +62,7 @@ function setBusy(on) {
 
 function showSyncNotice() {
   const failed = Object.keys(state.sync?.errors || {});
-  if (!failed.length && state.sync?.gotAny !== false) return;
+  if (!failed.length && state.sync?.gotAny) return;
   const el = $("notice");
   el.className = "notice";
   el.innerHTML = !state.sync.gotAny
@@ -79,7 +80,7 @@ function showError(err) {
       <ol><li>Turn on Cloudflare Access for this Worker and allow only your email.</li>
       <li>Put your team domain (like <code>yourteam.cloudflareaccess.com</code>) in <code>ACCESS_TEAM_DOMAIN</code> in <code>wrangler.toml</code>, then deploy again.</li></ol>`,
     no_login: `<h2>Sign in again</h2><p>${esc(err.message)} Reload the page to go through the Cloudflare Access login.</p>`,
-    garmin_auth: `<h2>Garmin key problem</h2><p>${esc(err.message)}</p><p>Update the <code>GARMIN_API_KEY</code> secret in GitHub and re-run the deploy.</p>`,
+    garmin_auth: `<h2>Garmin key problem</h2><p>${esc(err.message)}</p><p>Update the <code>GARMIN_API_KEY</code> secret in GitHub and re-run the deploy. Check-ins still save in the meantime.</p>`,
   };
   msgs.expired = msgs.bad_login = msgs.no_login;
   msgs.no_key = msgs.garmin_auth;
@@ -89,6 +90,7 @@ function showError(err) {
 
 // ---------- render ----------
 function render() {
+  document.body.classList.toggle("no-state", !state);
   if (!state) return;
   renderVerdict();
   renderCheckin();
@@ -345,4 +347,5 @@ $("checkin-form").addEventListener("submit", async (e) => {
   }
 });
 
+document.body.classList.add("no-state");
 load();

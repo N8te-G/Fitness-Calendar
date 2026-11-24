@@ -20,8 +20,15 @@ export class Store extends DurableObject {
     try {
       if (url.pathname === "/state" && request.method === "GET") {
         const today = url.searchParams.get("today");
-        await this.sync(today, url.searchParams.has("fresh"));
-        return json(await this.state(today));
+        let syncError = null;
+        try {
+          await this.sync(today, url.searchParams.has("fresh"));
+        } catch (err) {
+          if (err.status === 400) throw err;
+          // Garmin problems must not block check-ins: report them alongside the stored data.
+          syncError = { code: err.code || "error", message: err.message };
+        }
+        return json({ ...(await this.state(today)), syncError });
       }
       if (url.pathname === "/checkin" && request.method === "POST") {
         const body = await request.json();
