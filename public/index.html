@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Wellness Watch</title>
+<meta name="theme-color" content="#f2f5f3" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#111513" media="(prefers-color-scheme: dark)">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Space+Grotesk:wght@500;600;700&display=swap">
+<link rel="stylesheet" href="styles.css">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23176b5b'/%3E%3Cpath d='M6 17h5l2.5-6 4 11 3-7H26' fill='none' stroke='white' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+</head>
+<body>
+<header class="top">
+  <div class="top-inner">
+    <div class="brand">
+      <h1>Wellness Watch</h1>
+      <span id="status" class="status" aria-live="polite">Loading…</span>
+    </div>
+    <button id="refresh" class="icon-btn" type="button" aria-label="Sync with Garmin" title="Sync with Garmin">&#8635;</button>
+  </div>
+</header>
+
+<main class="wrap">
+  <div id="notice" class="notice" hidden></div>
+
+  <section id="verdict" class="verdict" aria-live="polite"></section>
+
+  <section class="panel" id="checkin-panel" aria-labelledby="checkin-title">
+    <div class="panel-head">
+      <h2 id="checkin-title">How do you feel today?</h2>
+      <label class="date-pick" for="checkin-date">
+        <span class="visually-hidden">Check-in date</span>
+        <select id="checkin-date"></select>
+      </label>
+    </div>
+    <div id="checkin-summary" class="checkin-summary" hidden></div>
+    <form id="checkin-form" class="checkin-form">
+      <fieldset class="feelings">
+        <legend class="visually-hidden">Overall feeling</legend>
+        <label><input type="radio" name="feeling" value="1" id="feel-1"><span><b>1</b>Unwell</span></label>
+        <label><input type="radio" name="feeling" value="2" id="feel-2"><span><b>2</b>Below par</span></label>
+        <label><input type="radio" name="feeling" value="3" id="feel-3"><span><b>3</b>Okay</span></label>
+        <label><input type="radio" name="feeling" value="4" id="feel-4"><span><b>4</b>Good</span></label>
+        <label><input type="radio" name="feeling" value="5" id="feel-5"><span><b>5</b>Great</span></label>
+      </fieldset>
+      <fieldset class="symptoms" id="symptoms">
+        <legend>Any symptoms?</legend>
+      </fieldset>
+      <label class="note" for="checkin-note">
+        <span>Note <small>(optional)</small></span>
+        <textarea id="checkin-note" rows="2" maxlength="1000" placeholder="e.g. partner has a cold, long-haul flight, late night"></textarea>
+      </label>
+      <div class="form-actions">
+        <button type="submit" class="primary" id="checkin-save">Save check-in</button>
+        <button type="button" class="ghost" id="checkin-cancel" hidden>Cancel</button>
+        <span id="checkin-msg" class="form-msg" role="status"></span>
+      </div>
+    </form>
+  </section>
+
+  <section class="panel" aria-labelledby="baseline-title">
+    <div class="panel-head">
+      <h2 id="baseline-title">Last night vs your baseline</h2>
+      <span class="hint">Shaded side = the direction that signals strain</span>
+    </div>
+    <div id="baseline" class="baseline"></div>
+  </section>
+
+  <section class="panel" aria-labelledby="trend-title">
+    <div class="panel-head">
+      <h2 id="trend-title">Last 30 days</h2>
+    </div>
+    <div id="charts" class="charts"></div>
+  </section>
+
+  <section class="panel" aria-labelledby="history-title">
+    <div class="panel-head"><h2 id="history-title">Recent days</h2></div>
+    <div id="history" class="history"></div>
+  </section>
+
+  <footer class="about">
+    <h2>How it works</h2>
+    <p>Your baseline is the median of the previous 60 days for each metric. The normal range is about one standard deviation either side, measured robustly so one odd night doesn't move it. Every morning, last night's numbers are compared with that baseline. Overnight HRV counts most, then resting heart rate, sleep breathing rate, sleep score, Body Battery recharge and stress. Signals that last two days in a row add to the score, and so does your check-in. Days you were unwell are left out of the baseline.</p>
+    <p>This is an early-warning aid built on your own data, not a medical diagnosis. If you feel unwell, trust that over the score.</p>
+  </footer>
+</main>
+
+<script src="app.js" type="module"></script>
+</body>
+</html>

@@ -1,0 +1,33 @@
+name = "wellness-watch"
+main = "src/worker.js"
+compatibility_date = "2025-10-01"
+account_id = "e599a466796c0bdba13b42e404789d98"
+
+# Serve at <name>.<subdomain>.workers.dev. Version preview URLs are turned off
+# so there is no second, unprotected address.
+workers_dev = true
+preview_urls = false
+
+[assets]
+directory = "./public"
+binding = "ASSETS"
+
+# One Durable Object stores your Garmin metrics and daily check-ins.
+[[durable_objects.bindings]]
+name = "STORE"
+class_name = "Store"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["Store"]
+
+[vars]
+# Your Cloudflare Access team domain, e.g. "yourteam.cloudflareaccess.com".
+# While this is empty the /api routes refuse every request, so no data is public.
+ACCESS_TEAM_DOMAIN = ""
+# Optional: the Access application's "Application Audience (AUD) Tag".
+ACCESS_AUD = ""
+# Optional: comma-separated emails allowed to see data (Access policy already limits this).
+ALLOWED_EMAILS = ""
+
+# GARMIN_API_KEY is a secret, set by the deploy workflow from the GitHub secret.
