@@ -213,7 +213,9 @@ const fmtNum = (v, digits) => v.toFixed(digits).replace(/^-(0\.?0*)$/, "$1");
 
 function renderBaseline() {
   const d = todayEntry();
-  const rows = Object.entries(state.metrics).map(([key, m]) => {
+  // Hide metrics this watch has never sent; the Data check still lists them.
+  const sent = (key) => state.days.some((x) => typeof x.metrics?.[key] === "number");
+  const rows = Object.entries(state.metrics).filter(([key]) => sent(key)).map(([key, m]) => {
     const e = d.z?.[key] || {};
     const has = e.median != null;
     const range = has ? `${fmtNum(e.median - e.sd, m.digits)} to ${fmtNum(e.median + e.sd, m.digits)}` : null;

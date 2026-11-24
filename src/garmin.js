@@ -96,7 +96,7 @@ export class Garmin {
   }
 }
 
-// ---------- SpO2 ----------
+// ---------- SpO2 and skin temperature ----------
 
 const SPO2_KEYS = [
   "averageSpO2Value", "avgSleepSpO2", "averageSleepSpO2", "avgSleepSpo2", "sleepAverageSpO2",
@@ -106,6 +106,25 @@ const SPO2_KEYS = [
 export function findSpo2(raw) {
   const v = deepFind(raw, SPO2_KEYS);
   return v != null && v > 50 && v <= 100 ? v : null;
+}
+
+/**
+ * Overnight skin-temperature change in °C, if Garmin includes one. Matches any
+ * numeric field whose name mentions skin temperature, preferring ones that are
+ * a change from baseline; absolute readings (around 30 °C) are ignored.
+ */
+export function findSkinTemp(obj) {
+  let best = null;
+  walk(obj, 5, (key, value) => {
+    const n = num(value);
+    if (n == null || !/skin.?temp/i.test(key)) return;
+    const fahrenheit = /(f|fahrenheit)$/i.test(key);
+    const c = fahrenheit ? n / 1.8 : n; // a change converts by scale only
+    if (Math.abs(c) >= 5) return; // an absolute temperature, not a change
+    const rank = /dev|change|delta|diff/i.test(key) ? 2 : 1;
+    if (!best || rank > best.rank) best = { v: c, rank };
+  });
+  return best ? Math.round(best.v * 100) / 100 : null;
 }
 
 function deepFind(obj, keys, depth = 4) {
@@ -135,7 +154,7 @@ function walk(obj, depth, visit) {
 }
 
 /** Field names (never values) in a response, for the in-app data check. */
-export function fieldNames(raw, limit = 80) {
+export function fieldNames(raw, limit = 400) {
   const names = new Set();
   walk(raw, 3, (k) => {
     if (!/^\d+$/.test(k)) names.add(k);
@@ -169,10 +188,14 @@ export function extract(raw) {
     set(d, "rhr", num(s.restingHeartRate ?? dto.restingHeartRate));
     set(d, "sleepSeconds", num(dto.sleepTimeSeconds ?? dto.totalSleepSeconds));
     set(d, "spo2", findSpo2(s));
+    set(d, "skinTemp", findSkinTemp(s));
+    // Overnight Body Battery gain, as shown on Garmin's sleep screen.
+    set(d, "bbOvernight", deepFind(s, ["bodyBatteryChange", "bodyBatteryChangeValue"]));
   }
 
   for (const b of rows(raw.bodyBattery)) {
-    set(dateOf(b), "bbCharged", num(b.charged ?? b.bodyBatteryChargedValue));
+    // Whole-day charge: only used for completed days when no overnight figure exists.
+    set(dateOf(b), "bbDaily", num(b.charged ?? b.bodyBatteryChargedValue));
     const values = (b.bodyBatteryValuesArray || [])
       .map((v) => num(Array.isArray(v) ? v[1] : v?.value))
       .filter((v) => v != null);
@@ -189,7 +212,8 @@ export function extract(raw) {
     set(d, "rhr", num(s.heartRate?.restingValue ?? s.restingHeartRate ?? s.restingHeartRateValue ?? s.values?.restingHeartRate));
     const st = num(s.averageStressLevel ?? s.values?.averageStressLevel);
     if (st != null && st >= 0) set(d, "stress", st);
-    set(d, "bbCharged", num(s.bodyBatteryChargedValue ?? s.values?.bodyBatteryChargedValue));
+    set(d, "bbDaily", num(s.bodyBattery?.chargedValue ?? s.bodyBatteryChargedValue ?? s.values?.bodyBatteryChargedValue));
+    set(d, "skinTemp", findSkinTemp(s));
     set(d, "steps", num(s.totalSteps ?? s.values?.totalSteps));
   }
   return days;

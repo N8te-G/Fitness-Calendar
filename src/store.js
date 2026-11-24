@@ -16,7 +16,7 @@ const HISTORY_DAYS = BASELINE_DAYS + 30; // enough for a full baseline plus a mo
 const CHUNK_DAYS = 28;
 const RESYNC_MINUTES = 30;
 // Bump when the way Garmin data is read changes, so stored history is re-downloaded.
-const EXTRACT_VERSION = 2;
+const EXTRACT_VERSION = 3;
 const RECENT_REFETCH_DAYS = 3; // Garmin fills in last night's data during the morning
 
 
@@ -204,7 +204,15 @@ export class Store extends DurableObject {
     const checkins = {};
     for (const [k, v] of checkMap) checkins[k.slice(8)] = v;
     const byDate = {};
-    for (const [k, v] of dayMap) byDate[k.slice(4)] = { ...v };
+    for (const [k, v] of dayMap) {
+      const date = k.slice(4);
+      const m = { ...v };
+      // Prefer the overnight charge. A whole-day total is only comparable for completed days:
+      // this morning's would count just the hours since midnight.
+      const bb = m.bbOvernight ?? (isDate(today) && date < today ? m.bbDaily : undefined);
+      if (bb != null) m.bbCharged = bb;
+      byDate[date] = m;
+    }
     for (const d of Object.keys(checkins)) byDate[d] ||= {};
     if (isDate(today)) byDate[today] ||= {};
 
