@@ -94,18 +94,12 @@ export class Garmin {
     if (auth) throw auth.reason;
     return { days: extract(raw), errors, fields: inventory(raw) };
   }
-
-  /** SpO2 for one night (Garmin only offers this per day). Returns a number or null. */
-  async spo2(date) {
-    const raw = await this.get(`/wellness-service/wellness/daily/spo2acclimation/${date}`);
-    return { value: findSpo2(raw), fields: fieldNames(raw) };
-  }
 }
 
 // ---------- SpO2 and skin temperature ----------
 
 const SPO2_KEYS = [
-  "avgSleepSpO2", "averageSleepSpO2", "avgSleepSpo2", "sleepAverageSpO2",
+  "averageSpO2Value", "avgSleepSpO2", "averageSleepSpO2", "avgSleepSpo2", "sleepAverageSpO2",
   "averageSpO2", "averageSPO2", "averageSpo2", "avgSpO2", "avgSpo2", "spo2Average",
 ];
 
@@ -206,7 +200,7 @@ export function extract(raw) {
 
   for (const s of rows(raw.summaries)) {
     const d = dateOf(s);
-    set(d, "rhr", num(s.restingHeartRate ?? s.restingHeartRateValue ?? s.values?.restingHeartRate));
+    set(d, "rhr", num(s.heartRate?.restingValue ?? s.restingHeartRate ?? s.restingHeartRateValue ?? s.values?.restingHeartRate));
     const st = num(s.averageStressLevel ?? s.values?.averageStressLevel);
     if (st != null && st >= 0) set(d, "stress", st);
     set(d, "bbCharged", num(s.bodyBatteryChargedValue ?? s.values?.bodyBatteryChargedValue));

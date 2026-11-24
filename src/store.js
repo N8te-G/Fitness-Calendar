@@ -1,7 +1,6 @@
 // One Durable Object holds everything for the single owner:
 //   day:YYYY-MM-DD      -> daily metrics pulled from Garmin
 //   checkin:YYYY-MM-DD  -> { feeling, symptoms, note, savedAt }
-//   spo2:YYYY-MM-DD     -> { v: number|null, at } (Garmin serves SpO2 one day per request)
 //   meta                -> { lastSync, syncedFrom, syncedTo, errors, fields }
 //   token               -> cached Garmin bearer token
 
@@ -13,10 +12,10 @@ import { mockMetrics } from "./mock.js";
 const HISTORY_DAYS = BASELINE_DAYS + 30; // enough for a full baseline plus a month of results
 const CHUNK_DAYS = 28;
 const RESYNC_MINUTES = 30;
+// Bump when the way Garmin data is read changes, so stored history is re-downloaded.
+const EXTRACT_VERSION = 2;
 const RECENT_REFETCH_DAYS = 3; // Garmin fills in last night's data during the morning
-// A free Worker may make ~50 outside requests per invocation; keep a margin.
-const REQUEST_BUDGET = 44;
-const SOURCES_PER_CHUNK = 5;
+
 
 export class Store extends DurableObject {
   async fetch(request) {
@@ -55,7 +54,8 @@ export class Store extends DurableObject {
     if (!isDate(today)) throw Object.assign(new Error("Parameter today must be YYYY-MM-DD."), { status: 400, code: "date" });
     const storage = this.ctx.storage;
     const meta = (await storage.get("meta")) || {};
-    const fresh = meta.lastSync && Date.now() - meta.lastSync < RESYNC_MINUTES * 60000 && meta.syncedTo === today;
+    const current = meta.version === EXTRACT_VERSION;
+    const fresh = current && meta.lastSync && Date.now() - meta.lastSync < RESYNC_MINUTES * 60000 && meta.syncedTo === today;
     // Local development: MOCK=1 uses sample data, unless GARMIN_BASE_URL points at a fake Garmin.
     const useMock = this.env.MOCK === "1" && !this.env.GARMIN_BASE_URL;
     const garmin = useMock
@@ -65,23 +65,15 @@ export class Store extends DurableObject {
           { get: () => storage.get("token"), put: (v) => storage.put("token", v) },
           (this.env.MOCK === "1" && this.env.GARMIN_BASE_URL) || undefined
         );
-    if (fresh && !force) {
-      // Keep backfilling SpO2 history on every load until it is complete.
-      if (garmin && meta.spo2Pending) {
-        const r = await this.syncSpo2(garmin, addDays(today, -(HISTORY_DAYS - 1)), today, REQUEST_BUDGET - 1, meta.fields || {});
-        await storage.put("meta", { ...meta, fields: r.fields, spo2Pending: r.pending });
-      }
-      return;
-    }
+    if (fresh && !force) return;
 
     const earliest = addDays(today, -(HISTORY_DAYS - 1));
-    const from = meta.syncedFrom && meta.syncedFrom <= earliest
+    const from = current && meta.syncedFrom && meta.syncedFrom <= earliest
       ? minDate(addDays(meta.syncedTo || today, -RECENT_REFETCH_DAYS), addDays(today, -RECENT_REFETCH_DAYS))
       : earliest;
 
     const errors = {};
     let gotAny = false;
-    let used = 1; // the token request
     let fields = meta.fields || {};
     for (let start = from; start <= today; start = addDays(start, CHUNK_DAYS)) {
       const end = minDate(addDays(start, CHUNK_DAYS - 1), today);
@@ -93,7 +85,6 @@ export class Store extends DurableObject {
         errors[`${start}…${end}`] = err.message;
         continue;
       }
-      used += SOURCES_PER_CHUNK;
       Object.assign(errors, result.errors);
       if (result.fields) fields = { ...fields, ...nonEmpty(result.fields) };
       const puts = {};
@@ -104,18 +95,6 @@ export class Store extends DurableObject {
       if (Object.keys(puts).length) await storage.put(puts);
     }
 
-    let spo2Pending = false;
-    if (garmin) {
-      try {
-        const r = await this.syncSpo2(garmin, earliest, today, REQUEST_BUDGET - used, fields);
-        fields = r.fields;
-        spo2Pending = r.pending;
-      } catch (err) {
-        errors.spo2 = err.message;
-        spo2Pending = true;
-      }
-    }
-
     await storage.put("meta", {
       lastSync: Date.now(),
       syncedFrom: meta.syncedFrom && meta.syncedFrom < from ? meta.syncedFrom : from,
@@ -123,40 +102,8 @@ export class Store extends DurableObject {
       errors,
       gotAny: gotAny || !!meta.gotAny,
       fields,
-      spo2Pending,
+      version: EXTRACT_VERSION,
     });
-  }
-
-  /** Fill SpO2 newest-first, a limited number of nights per sync, refreshing the last few. */
-  async syncSpo2(garmin, earliest, today, budget, fields) {
-    if (budget <= 0) return { fields, pending: true };
-    const storage = this.ctx.storage;
-    const have = await storage.list({ prefix: "spo2:", start: `spo2:${earliest}` });
-    const recentFrom = addDays(today, -RECENT_REFETCH_DAYS);
-    const want = [];
-    let pending = false;
-    for (let d = today; d >= earliest; d = addDays(d, -1)) {
-      const rec = have.get(`spo2:${d}`);
-      if (!rec || (d >= recentFrom && Date.now() - rec.at > RESYNC_MINUTES * 60000)) {
-        if (want.length < budget) want.push(d);
-        else if (!rec) pending = true;
-      }
-    }
-    const puts = {};
-    for (let i = 0; i < want.length; i += 6) {
-      const batch = want.slice(i, i + 6);
-      const results = await Promise.allSettled(batch.map((d) => garmin.spo2(d)));
-      results.forEach((r, j) => {
-        if (r.status === "fulfilled") {
-          puts[`spo2:${batch[j]}`] = { v: r.value.value, at: Date.now() };
-          if (r.value.fields.length && !fields.spo2?.length) fields = { ...fields, spo2: r.value.fields };
-        }
-      });
-      const failed = results.find((r) => r.status === "rejected");
-      if (failed && !Object.keys(puts).length) throw failed.reason;
-    }
-    if (Object.keys(puts).length) await storage.put(puts);
-    return { fields, pending };
   }
 
   async saveCheckin(body) {
@@ -173,20 +120,15 @@ export class Store extends DurableObject {
 
   async state(today) {
     const storage = this.ctx.storage;
-    const [dayMap, checkMap, spo2Map, meta] = await Promise.all([
+    const [dayMap, checkMap, meta] = await Promise.all([
       storage.list({ prefix: "day:" }),
       storage.list({ prefix: "checkin:" }),
-      storage.list({ prefix: "spo2:" }),
       storage.get("meta"),
     ]);
     const checkins = {};
     for (const [k, v] of checkMap) checkins[k.slice(8)] = v;
     const byDate = {};
     for (const [k, v] of dayMap) byDate[k.slice(4)] = { ...v };
-    for (const [k, rec] of spo2Map) {
-      const d = k.slice(5);
-      if (typeof rec?.v === "number") (byDate[d] ||= {}).spo2 ??= rec.v;
-    }
     for (const d of Object.keys(checkins)) byDate[d] ||= {};
     if (isDate(today)) byDate[today] ||= {};
 
