@@ -137,9 +137,7 @@ export class Store extends DurableObject {
       const sub = await storage.get(key);
       return {
         publicKey: keys.publicKey,
-        reminder: sub
-          ? { time: sub.time, tz: sub.tz, hasKeys: !!(sub.p256dh && sub.auth), lastTest: sub.lastTest || null, lastReceived: sub.lastReceived || null }
-          : null,
+        reminder: sub ? { time: sub.time, tz: sub.tz } : null,
       };
     }
     if (path === "/reminder/save") {
@@ -166,27 +164,11 @@ export class Store extends DurableObject {
       await storage.delete(key);
       return { reminder: null };
     }
-    if (path === "/reminder/test") {
-      const sub = await storage.get(key);
-      if (!sub) throw httpError(404, "no_reminder", "Turn the reminder on first.");
-      const { status, detail } = await sendPush(keys, sub, sub.origin, await this.reminderMessage(localNow(sub.tz).date, true));
-      await storage.put(key, { ...sub, lastTest: { at: Date.now(), status, encrypted: !!(sub.p256dh && sub.auth) } });
-      if (status >= 400) {
-        throw httpError(502, "push", `Google's push service refused the message (${status})${detail ? `: ${detail}` : ""}.`);
-      }
-      return { sent: true, status, host: new URL(sub.endpoint).host };
-    }
-    if (path === "/reminder/received") {
-      // The phone's service worker reports that a push arrived (and any error showing it).
-      const sub = await storage.get(key);
-      if (sub) await storage.put(key, { ...sub, lastReceived: { at: Date.now(), error: String(body.error || "").slice(0, 300) } });
-      return { ok: true };
-    }
     throw httpError(404, "not_found", "Unknown reminder route.");
   }
 
   /** Notification text, including today's risk level when it isn't Normal. */
-  async reminderMessage(date, test) {
+  async reminderMessage(date) {
     let body = "How do you feel today? It takes 10 seconds.";
     try {
       await this.sync(date, false).catch(() => {}); // pick up last night's data if it's arrived
@@ -196,7 +178,7 @@ export class Store extends DurableObject {
     } catch {
       // Plain reminder if the data can't be read.
     }
-    return { title: test ? "Wellness Watch test" : "Wellness Watch check-in", body, url: "/#checkin" };
+    return { title: "Wellness Watch check-in", body, url: "/#checkin" };
   }
 
   async sendDueReminders() {
@@ -212,7 +194,7 @@ export class Store extends DurableObject {
         await storage.put(key, { ...sub, lastSentDate: now.date }); // already checked in today
         continue;
       }
-      const message = await this.reminderMessage(now.date, false);
+      const message = await this.reminderMessage(now.date);
       const { status } = await sendPush(keys, sub, sub.origin, message).catch(() => ({ status: 0 }));
       if (status === 404 || status === 410) await storage.delete(key); // phone unsubscribed
       else if (status >= 200 && status < 300) {
