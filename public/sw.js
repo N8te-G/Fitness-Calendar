@@ -1,4 +1,5 @@
 // Service worker: shows the morning check-in reminder when a push arrives.
+const VERSION = 4;
 const today = () => {
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
@@ -6,6 +7,17 @@ const today = () => {
 
 self.addEventListener("install", () => self.skipWaiting());
 self.addEventListener("activate", (e) => e.waitUntil(self.clients.claim()));
+
+// The app asks which version is running, for its diagnostics.
+self.addEventListener("message", (e) => {
+  if (e.data === "version") e.source?.postMessage({ type: "version", version: VERSION });
+});
+
+// Tell any open app window directly (no network needed) that a push arrived.
+async function tellApp(info) {
+  const all = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
+  for (const c of all) c.postMessage({ type: "push", at: Date.now(), ...info });
+}
 
 // Tell the app a push arrived, so the reminder panel can show it reached this phone.
 async function report(error) {
@@ -65,6 +77,7 @@ self.addEventListener("push", (event) => {
       // Last resort: the plainest possible notification.
       await self.registration.showNotification(title, { body }).catch(() => {});
     }
+    await tellApp({ encrypted: !!message, error });
     await report(error);
   })());
 });

@@ -170,7 +170,7 @@ export class Store extends DurableObject {
       const sub = await storage.get(key);
       if (!sub) throw httpError(404, "no_reminder", "Turn the reminder on first.");
       const { status, detail } = await sendPush(keys, sub, sub.origin, await this.reminderMessage(localNow(sub.tz).date, true));
-      await storage.put(key, { ...sub, lastTest: { at: Date.now(), status } });
+      await storage.put(key, { ...sub, lastTest: { at: Date.now(), status, encrypted: !!(sub.p256dh && sub.auth) } });
       if (status >= 400) {
         throw httpError(502, "push", `Google's push service refused the message (${status})${detail ? `: ${detail}` : ""}.`);
       }

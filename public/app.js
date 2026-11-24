@@ -395,7 +395,7 @@ function showReminder(reminder) {
   const t = reminder?.lastTest, r = reminder?.lastReceived;
   if (t || r) {
     const parts = [];
-    if (t) parts.push(`Last test sent ${clock(t.at)} (push service replied ${t.status})`);
+    if (t) parts.push(`Last test sent ${clock(t.at)} (${t.encrypted ? "encrypted" : "empty"}, push service replied ${t.status})`);
     if (r && (!t || r.at >= t.at - 5000)) {
       parts.push(`reached this phone ${clock(r.at)}${r.error ? `, but showing it failed: ${r.error}` : ""}`);
     } else if (t) {
@@ -408,6 +408,26 @@ function showReminder(reminder) {
   if (reminder) $("reminder-time").value = reminder.time;
 }
 
+let swVersion = null;
+let lastPushSeen = null;
+if ("serviceWorker" in navigator) {
+  navigator.serviceWorker.addEventListener("message", (e) => {
+    if (e.data?.type === "version") swVersion = e.data.version;
+    if (e.data?.type === "push") {
+      lastPushSeen = e.data;
+      $("reminder-msg").textContent = `A push just arrived on this phone (${e.data.encrypted ? "encrypted" : "empty"})${e.data.error ? `, but showing it failed: ${e.data.error}` : ""}.`;
+    }
+    showVersion();
+  });
+}
+
+function showVersion() {
+  const diag = $("reminder-diag");
+  const tag = ` Notification code v${swVersion ?? "?"}.`;
+  diag.textContent = diag.textContent.replace(/ Notification code v\S+\.$/, "") + tag;
+  diag.hidden = false;
+}
+
 async function initReminder() {
   if (!pushSupported) {
     $("reminder-text").textContent = "This browser can't receive notifications. On Android, open the app in Chrome.";
@@ -417,6 +437,7 @@ async function initReminder() {
   try {
     swReg = await navigator.serviceWorker.register("/sw.js", { updateViaCache: "none" });
     swReg.update().catch(() => {});
+    navigator.serviceWorker.ready.then((r) => r.active?.postMessage("version"));
     const sub = await swReg.pushManager.getSubscription();
     if (!sub) return showReminder(null);
     let { reminder } = await post("/api/reminder/status", { endpoint: sub.endpoint });
@@ -471,12 +492,18 @@ $("reminder-test").addEventListener("click", async () => {
       await new Promise((r) => setTimeout(r, wait));
       const { reminder } = await post("/api/reminder/status", { endpoint: sub.endpoint });
       showReminder(reminder);
+      if (lastPushSeen && lastPushSeen.at >= reminder.lastTest.at - 5000) {
+        msg.textContent = `The push reached this phone${lastPushSeen.error ? `, but showing it failed: ${lastPushSeen.error}` : ""}.`;
+        showVersion();
+        return;
+      }
       if (reminder?.lastReceived && reminder.lastReceived.at >= reminder.lastTest.at - 5000) {
         msg.textContent = reminder.lastReceived.error ? "The push arrived but the notification couldn't be shown." : "The push reached this phone.";
         return;
       }
     }
-    msg.textContent = "The push service accepted the test, but this phone hasn't reported receiving it after 15 seconds.";
+    msg.textContent = "The push service accepted the test, but it hasn't arrived on this phone after 15 seconds.";
+    showVersion();
   } catch (err) {
     msg.textContent = `Test failed: ${err.message}`;
   }
