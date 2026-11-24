@@ -394,7 +394,8 @@ async function initReminder() {
     return;
   }
   try {
-    swReg = await navigator.serviceWorker.register("/sw.js");
+    swReg = await navigator.serviceWorker.register("/sw.js", { updateViaCache: "none" });
+    swReg.update().catch(() => {});
     const sub = await swReg.pushManager.getSubscription();
     if (!sub) return showReminder(null);
     const { reminder } = await post("/api/reminder/status", { endpoint: sub.endpoint });
@@ -438,7 +439,7 @@ $("reminder-test").addEventListener("click", async () => {
     const sub = await swReg?.pushManager.getSubscription();
     if (!sub) return showReminder(null);
     await post("/api/reminder/test", { endpoint: sub.endpoint });
-    msg.textContent = "Test sent. It should appear within a few seconds.";
+    msg.textContent = "Test sent. It should appear within a few seconds. If it doesn't, check that Chrome is allowed to show notifications in Android settings.";
   } catch (err) {
     msg.textContent = `Test failed: ${err.message}`;
   }

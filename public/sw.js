@@ -12,7 +12,8 @@ self.addEventListener("push", (event) => {
     let body = "How do you feel today? It takes 10 seconds.";
     try {
       // Uses the same login cookie as the app; if it has expired we fall back to the plain text.
-      const res = await fetch(`/api/state?today=${today()}`, { credentials: "include" });
+      // Give up after 4 seconds so the reminder always shows promptly.
+      const res = await fetch(`/api/state?today=${today()}`, { credentials: "include", signal: AbortSignal.timeout(4000) });
       if (res.ok) {
         const state = await res.json();
         const day = state.days?.find((d) => d.date === today());
@@ -26,8 +27,8 @@ self.addEventListener("push", (event) => {
       body,
       tag: "checkin",
       renotify: true,
-      icon: "/icon.svg",
-      badge: "/icon.svg",
+      icon: "/icon-192.png",
+      badge: "/badge-96.png",
       data: { url: "/#checkin" },
     });
   })());
