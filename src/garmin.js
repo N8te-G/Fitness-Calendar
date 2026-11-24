@@ -13,18 +13,27 @@ export class GarminError extends Error {
 }
 
 export class Garmin {
-  constructor(apiKey, tokenStore) {
+  constructor(apiKey, tokenStore, base = GARMIN_BASE) {
+    this.base = base;
     this.apiKey = (apiKey || "").trim();
     this.tokenStore = tokenStore; // { get(): Promise<{value,exp}|undefined>, put(v) }
     this.token = null;
   }
 
-  async bearer(force = false) {
+  bearer(force = false) {
+    // Parallel requests share one token exchange instead of each starting their own.
+    if (!this.pending || force) {
+      this.pending = this.fetchBearer(force).finally(() => { this.pending = null; });
+    }
+    return this.pending;
+  }
+
+  async fetchBearer(force) {
     const now = Date.now() / 1000;
     if (!this.token && !force) this.token = (await this.tokenStore.get()) || null;
     if (!force && this.token && this.token.exp - now > 3600) return this.token.value;
     if (!this.apiKey) throw new GarminError("no_key", "The GARMIN_API_KEY secret is not set.", 500);
-    const res = await fetch(GARMIN_BASE + TOKEN_PATH, {
+    const res = await fetch(this.base + TOKEN_PATH, {
       method: "POST",
       headers: { Accept: "*/*", Authorization: `ApiKey ${this.apiKey}` },
     });
@@ -45,7 +54,7 @@ export class Garmin {
   }
 
   async get(path, params) {
-    const url = new URL(GARMIN_BASE + path);
+    const url = new URL(this.base + path);
     for (const [k, v] of Object.entries(params || {})) url.searchParams.set(k, String(v));
     let res;
     for (let attempt = 0; attempt < 2; attempt++) {
@@ -83,8 +92,80 @@ export class Garmin {
     });
     const auth = results.find((r) => r.status === "rejected" && ["garmin_auth", "no_key"].includes(r.reason?.code));
     if (auth) throw auth.reason;
-    return { days: extract(raw), errors };
+    return { days: extract(raw), errors, fields: inventory(raw) };
   }
+
+  /** SpO2 for one night (Garmin only offers this per day). Returns a number or null. */
+  async spo2(date) {
+    const raw = await this.get(`/wellness-service/wellness/daily/spo2acclimation/${date}`);
+    return { value: findSpo2(raw), fields: fieldNames(raw) };
+  }
+}
+
+// ---------- SpO2 and skin temperature ----------
+
+const SPO2_KEYS = [
+  "avgSleepSpO2", "averageSleepSpO2", "avgSleepSpo2", "sleepAverageSpO2",
+  "averageSpO2", "averageSPO2", "averageSpo2", "avgSpO2", "avgSpo2", "spo2Average",
+];
+
+export function findSpo2(raw) {
+  const v = deepFind(raw, SPO2_KEYS);
+  return v != null && v > 50 && v <= 100 ? v : null;
+}
+
+/** Overnight skin-temperature change in °C, if Garmin includes one for this watch. */
+export function findSkinTemp(obj) {
+  let best = null;
+  walk(obj, 4, (key, value) => {
+    if (typeof value !== "number" || !/skin.?temp/i.test(key)) return;
+    const isDeviation = /dev|change|delta|diff/i.test(key);
+    const isF = /f(ahrenheit)?$/i.test(key) && !/c(elsius)?$/i.test(key);
+    const c = isF ? value / 1.8 : value; // deviations convert by scale only
+    if (isDeviation && Math.abs(c) < 5 && (best == null || !best.dev)) best = { v: c, dev: true };
+  });
+  return best ? Math.round(best.v * 100) / 100 : null;
+}
+
+function deepFind(obj, keys, depth = 4) {
+  let found = null;
+  for (const k of keys) {
+    walk(obj, depth, (key, value) => {
+      if (found == null && key === k) {
+        const n = num(value);
+        if (n != null) found = n;
+      }
+    });
+    if (found != null) return found;
+  }
+  return null;
+}
+
+function walk(obj, depth, visit) {
+  if (!obj || typeof obj !== "object" || depth < 0) return;
+  if (Array.isArray(obj)) {
+    for (const item of obj.slice(0, 3)) walk(item, depth - 1, visit);
+    return;
+  }
+  for (const [k, v] of Object.entries(obj)) {
+    visit(k, v);
+    if (v && typeof v === "object") walk(v, depth - 1, visit);
+  }
+}
+
+/** Field names (never values) in a response, for the in-app data check. */
+export function fieldNames(raw, limit = 80) {
+  const names = new Set();
+  walk(raw, 3, (k) => {
+    if (!/^\d+$/.test(k)) names.add(k);
+  });
+  return [...names].slice(0, limit);
+}
+
+function inventory(raw) {
+  const out = {};
+  for (const [k, v] of Object.entries(raw)) out[k] = fieldNames(v);
+  return out;
 }
 
 // ---------- shape-tolerant extraction ----------
@@ -106,6 +187,8 @@ export function extract(raw) {
     set(d, "resp", num(dto.averageRespirationValue ?? dto.avgSleepRespiration ?? dto.averageRespiration ?? s.averageRespirationValue));
     set(d, "rhr", num(s.restingHeartRate ?? dto.restingHeartRate));
     set(d, "sleepSeconds", num(dto.sleepTimeSeconds ?? dto.totalSleepSeconds));
+    set(d, "skinTemp", findSkinTemp(s));
+    set(d, "spo2", findSpo2(s));
   }
 
   for (const b of rows(raw.bodyBattery)) {
@@ -128,6 +211,7 @@ export function extract(raw) {
     if (st != null && st >= 0) set(d, "stress", st);
     set(d, "bbCharged", num(s.bodyBatteryChargedValue ?? s.values?.bodyBatteryChargedValue));
     set(d, "steps", num(s.totalSteps ?? s.values?.totalSteps));
+    set(d, "skinTemp", findSkinTemp(s));
   }
   return days;
 }

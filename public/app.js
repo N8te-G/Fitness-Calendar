@@ -97,6 +97,20 @@ function render() {
   renderBaseline();
   renderCharts();
   renderHistory();
+  renderDataCheck();
+}
+
+function renderDataCheck() {
+  const recent = state.days.slice(-30);
+  const rows = Object.entries(state.metrics).map(([key, m]) => {
+    const n = recent.filter((d) => typeof d.metrics?.[key] === "number").length;
+    return `<tr><td>${esc(m.label)}</td><td class="${n ? "dc-ok" : "dc-miss"}">${n ? `${n} of ${recent.length} days` : "not received"}</td></tr>`;
+  }).join("");
+  const fields = Object.entries(state.fields || {})
+    .map(([src, names]) => `<p class="dc-fields"><b>${esc(src)}:</b> ${esc(names.join(", "))}</p>`)
+    .join("");
+  $("datacheck").innerHTML = `<table class="dc-table"><tbody>${rows}</tbody></table>
+    ${fields ? `<p class="dc-fields">Field names Garmin returned (no values):</p>${fields}` : ""}`;
 }
 
 const todayEntry = () => state.days.find((d) => d.date === today) || state.days[state.days.length - 1];
@@ -104,7 +118,8 @@ const todayEntry = () => state.days.find((d) => d.date === today) || state.days[
 function fmt(key, v) {
   if (v == null) return "–";
   const m = state.metrics[key];
-  return `${v.toFixed(m.digits)}${m.unit ? ` ${m.unit}` : ""}`;
+  const txt = v.toFixed(m.digits).replace(/^-(0\.?0*)$/, "$1");
+  return `${txt}${m.unit ? ` ${m.unit}` : ""}`;
 }
 
 function renderVerdict() {
@@ -194,15 +209,19 @@ function renderCheckin() {
   }
 }
 
+const fmtNum = (v, digits) => v.toFixed(digits).replace(/^-(0\.?0*)$/, "$1");
+
 function renderBaseline() {
   const d = todayEntry();
   const rows = Object.entries(state.metrics).map(([key, m]) => {
     const e = d.z?.[key] || {};
     const has = e.median != null;
-    const range = has ? `${(e.median - e.sd).toFixed(m.digits)}–${(e.median + e.sd).toFixed(m.digits)}` : null;
+    const range = has ? `${fmtNum(e.median - e.sd, m.digits)} to ${fmtNum(e.median + e.sd, m.digits)}` : null;
     const vals = has
       ? `Normal ${range}${m.unit ? ` ${m.unit}` : ""} · ${e.n} days`
-      : `Baseline needs 14 days · ${e.n || 0} so far`;
+      : e.n
+        ? `Baseline needs 14 days · ${e.n} so far`
+        : "Not received from Garmin yet";
     return `<div class="brow">
       <div><div class="bname">${esc(m.label)}</div><div class="bvals">${esc(vals)}</div></div>
       <div class="bnow">${e.value != null ? esc(fmt(key, e.value)) : "–"}${e.z != null ? `<br><small>${e.z >= 0 ? "+" : "−"}${Math.abs(e.z).toFixed(1)} SD</small>` : e.value == null ? "<br><small>no data</small>" : ""}</div>

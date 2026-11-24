@@ -81,9 +81,14 @@
     <div id="history" class="history"></div>
   </section>
 
+  <details class="panel datacheck" id="datacheck-panel">
+    <summary><h2>Data check</h2><span class="hint">What Garmin is sending</span></summary>
+    <div id="datacheck"></div>
+  </details>
+
   <footer class="about">
     <h2>How it works</h2>
-    <p>Your baseline is the median of the previous 60 days for each metric. The normal range is about one standard deviation either side, measured robustly so one odd night doesn't move it. Every morning, last night's numbers are compared with that baseline. Overnight HRV counts most, then resting heart rate, sleep breathing rate, sleep score, Body Battery recharge and stress. Signals that last two days in a row add to the score, and so does your check-in. Days you were unwell are left out of the baseline.</p>
+    <p>Your baseline is the median of the previous 60 days for each metric. The normal range is about one standard deviation either side, measured robustly so one odd night doesn't move it. Every morning, last night's numbers are compared with that baseline. Overnight HRV counts most, then resting heart rate, skin temperature change, sleep breathing rate, SpO2, sleep score, Body Battery recharge and stress. Metrics your watch doesn't record are simply left out. Signals that last two days in a row add to the score, and so does your check-in. Days you were unwell are left out of the baseline.</p>
     <p>This is an early-warning aid built on your own data, not a medical diagnosis. If you feel unwell, trust that over the score.</p>
   </footer>
 </main>
