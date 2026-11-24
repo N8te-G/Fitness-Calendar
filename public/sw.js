@@ -1,40 +1,6 @@
 // Service worker: shows the morning check-in reminder when a push arrives.
-const VERSION = 4;
-const today = () => {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-};
-
 self.addEventListener("install", () => self.skipWaiting());
 self.addEventListener("activate", (e) => e.waitUntil(self.clients.claim()));
-
-// The app asks which version is running, for its diagnostics.
-self.addEventListener("message", (e) => {
-  if (e.data === "version") e.source?.postMessage({ type: "version", version: VERSION });
-});
-
-// Tell any open app window directly (no network needed) that a push arrived.
-async function tellApp(info) {
-  const all = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
-  for (const c of all) c.postMessage({ type: "push", at: Date.now(), ...info });
-}
-
-// Tell the app a push arrived, so the reminder panel can show it reached this phone.
-async function report(error) {
-  try {
-    const sub = await self.registration.pushManager.getSubscription();
-    if (!sub) return;
-    await fetch("/api/reminder/received", {
-      method: "POST",
-      credentials: "include",
-      headers: { "Content-Type": "application/json", "X-Requested-With": "wellness-watch" },
-      body: JSON.stringify({ endpoint: sub.endpoint, error: error || "" }),
-      signal: AbortSignal.timeout(4000),
-    });
-  } catch {
-    // Reporting is best-effort.
-  }
-}
 
 self.addEventListener("push", (event) => {
   event.waitUntil((async () => {
@@ -49,20 +15,7 @@ self.addEventListener("push", (event) => {
     if (message) {
       title = message.title || title;
       body = message.body || body;
-    } else try {
-      // Uses the same login cookie as the app; if it has expired we fall back to the plain text.
-      // Give up after 4 seconds so the reminder always shows promptly.
-      const res = await fetch(`/api/state?today=${today()}`, { credentials: "include", signal: AbortSignal.timeout(4000) });
-      if (res.ok) {
-        const state = await res.json();
-        const day = state.days?.find((d) => d.date === today());
-        const label = { watch: "Watch", elevated: "Elevated", high: "High" }[day?.level];
-        if (label) body = `Illness risk: ${label}. How do you feel today?`;
-      }
-    } catch {
-      // Offline or logged out: plain reminder.
     }
-    let error = "";
     try {
       await self.registration.showNotification(title, {
         body,
@@ -72,13 +25,10 @@ self.addEventListener("push", (event) => {
         badge: "/badge-96.png",
         data: { url: "/#checkin" },
       });
-    } catch (err) {
-      error = err.message || String(err);
+    } catch {
       // Last resort: the plainest possible notification.
       await self.registration.showNotification(title, { body }).catch(() => {});
     }
-    await tellApp({ encrypted: !!message, error });
-    await report(error);
   })());
 });
 

@@ -178,7 +178,6 @@ textarea {
 
 /* Reminder */
 .reminder-text { margin: 0; font-size: 0.9rem; color: var(--muted); }
-.reminder-diag { margin: 0; }
 .reminder-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .time-label { display: inline-flex; align-items: center; gap: 8px; font-size: 0.85rem; font-weight: 600; }
 .time-label input {
