@@ -8,7 +8,7 @@
 
 import { DurableObject } from "cloudflare:workers";
 import { Garmin, GarminError } from "./garmin.js";
-import { assess, BASELINE_DAYS, METRICS, SYMPTOMS, LEVELS } from "./model.js";
+import { assess, learn, BASELINE_DAYS, METRICS, SYMPTOMS, LEVELS } from "./model.js";
 import { mockMetrics } from "./mock.js";
 import { vapidKeys, sendPush, localNow, isDue } from "./push.js";
 
@@ -257,13 +257,16 @@ export class Store extends DurableObject {
     for (const d of Object.keys(checkins)) byDate[d] ||= {};
     if (isDate(today)) byDate[today] ||= {};
 
-    const results = assess(
-      Object.entries(byDate).map(([date, metrics]) => ({ date, metrics })),
-      checkins
-    );
+    const dayList = Object.entries(byDate).map(([date, metrics]) => ({ date, metrics }));
+    // First pass with the research weights; then, once enough illnesses are logged,
+    // a second pass with the weights nudged by your own history.
+    let results = assess(dayList, checkins);
+    const learning = learn(results, checkins);
+    if (learning.influence > 0) results = assess(dayList, checkins, learning.weights);
     return {
       today,
       days: results.slice(-HISTORY_DAYS),
+      learning,
       metrics: METRICS,
       symptoms: SYMPTOMS,
       levels: LEVELS,

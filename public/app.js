@@ -97,7 +97,53 @@ function render() {
   renderBaseline();
   renderCharts();
   renderHistory();
+  renderRecord();
   renderDataCheck();
+}
+
+function renderRecord() {
+  const L = state.learning;
+  if (!L) return;
+  const r = L.record;
+  const need = L.minEpisodes;
+  $("record-status").textContent = L.influence > 0
+    ? `Personal tuning on · ${Math.round(L.influence * 100)}% your data`
+    : `Personal tuning starts at ${need} illnesses`;
+
+  if (!r.illnesses) {
+    $("record").innerHTML = `<p>No illnesses logged yet. When you check in feeling unwell (1 or 2, or with two or more symptoms), it's recorded as an illness. The app then checks whether your body signals warned you in the 3 days before.</p>`;
+    return;
+  }
+  const leadText = (d) => (d < 0.05 ? "on the day" : `on average ${d.toFixed(1)} day${d.toFixed(1) === "1.0" ? "" : "s"} ahead`);
+  const lead = r.avgLeadDays == null ? "" : `, ${leadText(r.avgLeadDays)}`;
+  const stats = [
+    [`${r.caught} of ${r.withData}`, `illnesses warned about${lead}`],
+    [r.alerts ? `${r.falseAlarms} of ${r.alerts}` : "–", "warnings that were false alarms"],
+    [`${r.illnesses}`, `illness${r.illnesses === 1 ? "" : "es"} logged${r.withData < r.illnesses ? ` (${r.illnesses - r.withData} without enough Garmin data)` : ""}`],
+  ].map(([v, l]) => `<div class="record-stat"><div class="value">${esc(v)}</div><div class="label">${esc(l)}</div></div>`).join("");
+
+  const episodes = L.episodes.slice(-6).reverse().map((e) => {
+    const span = e.onset === e.end ? shortDate(e.onset) : `${shortDate(e.onset)} – ${shortDate(e.end)}`;
+    const verdict = !e.hasData ? "not enough data" : e.caught ? (e.leadDays ? `warned ${e.leadDays} day${e.leadDays === 1 ? "" : "s"} ahead` : "warned on the day") : "missed";
+    return `<div><span>${esc(span)}</span><span>${esc(verdict)}</span></div>`;
+  }).join("");
+
+  let tuning;
+  if (L.influence > 0) {
+    const rows = Object.entries(L.weights)
+      .filter(([k]) => L.signals[k]?.pre != null)
+      .map(([k, w]) => {
+        const base = L.research[k];
+        const pct = Math.round((w / base - 1) * 100);
+        const cls = pct > 2 ? "up" : pct < -2 ? "down" : "";
+        return `<tr><td>${esc(state.metrics[k].label)}</td><td>${base.toFixed(2)}</td><td class="${cls}">${w.toFixed(2)} ${pct > 0 ? "+" : ""}${pct}%</td></tr>`;
+      }).join("");
+    tuning = `<p>Weightings now lean ${Math.round(L.influence * 100)}% towards the metrics that moved before your illnesses (up to 30% at most).</p>
+      <table class="weights"><thead><tr><th>Metric</th><th>Research</th><th>Yours</th></tr></thead><tbody>${rows}</tbody></table>`;
+  } else {
+    tuning = `<p>Using research-based weightings. Personal tuning starts after ${need} reported illnesses with Garmin data (${r.withData} so far).</p>`;
+  }
+  $("record").innerHTML = `<div class="record-stats">${stats}</div>${tuning}${episodes ? `<h3 class="sub-head">Recent illnesses</h3><div class="episodes">${episodes}</div>` : ""}`;
 }
 
 function renderDataCheck() {

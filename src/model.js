@@ -63,7 +63,7 @@ export function selfScore(checkin) {
   return Math.min(2.2, s);
 }
 
-function selfSick(checkin) {
+export function selfSick(checkin) {
   if (!checkin) return false;
   return Number(checkin.feeling) <= 2 || (checkin.symptoms || []).length >= 2;
 }
@@ -79,9 +79,11 @@ const toT = (d) => Date.parse(d + "T00:00:00Z");
 /**
  * @param {Array<{date:string, metrics:object}>} days  any order; one entry per date
  * @param {Record<string, object>} checkins  by date
+ * @param {Record<string, number>} [weights]  per-metric weights; defaults to the research weights
  * @returns per-day assessments, ascending by date
  */
-export function assess(days, checkins = {}) {
+export function assess(days, checkins = {}, weights = null) {
+  const w = (key) => weights?.[key] ?? METRICS[key].weight;
   const sorted = [...days].sort((a, b) => (a.date < b.date ? -1 : 1));
   const excluded = new Set();
   const out = [];
@@ -117,7 +119,7 @@ export function assess(days, checkins = {}) {
         if (entry.value != null) {
           entry.z = (entry.value - med) / sd;
           entry.zBad = Math.min(Z_CAP, Math.max(0, entry.z * cfg.bad - DEAD_ZONE));
-          phys += cfg.weight * entry.zBad;
+          phys += w(key) * entry.zBad;
         }
         if (key === "hrv") ready = true;
       }
@@ -133,7 +135,7 @@ export function assess(days, checkins = {}) {
 
     const reasons = Object.entries(z)
       .filter(([key, e]) => e.z != null && e.z * METRICS[key].bad >= REASON_Z)
-      .sort((a, b) => METRICS[b[0]].weight * b[1].zBad - METRICS[a[0]].weight * a[1].zBad)
+      .sort((a, b) => w(b[0]) * b[1].zBad - w(a[0]) * a[1].zBad)
       .map(([key, e]) => ({ key, value: e.value, median: e.median, sd: e.sd, z: e.z }));
 
     out.push({ date, metrics, checkin, z, phys, persist, self, score, level, reasons, ready });
@@ -143,4 +145,146 @@ export function assess(days, checkins = {}) {
     prevDate = date;
   }
   return out;
+}
+
+// ---------- learning from check-ins ----------
+//
+// Check-ins mark when you were actually ill. From those, the app keeps a track
+// record of its warnings and, once enough illnesses are logged, nudges the
+// research weights towards the metrics that warned early for you. Research
+// keeps at least 70% of the say.
+
+export const LEARNING = {
+  minEpisodes: 3, // personal tuning starts after this many reported illnesses
+  maxInfluence: 0.3, // personal data never decides more than 30% of a weight
+  influencePerEpisode: 0.1, // 10% at 3 illnesses, 20% at 4, 30% from 5
+  leadDays: 3, // a warning up to 3 days before you felt ill counts as caught
+  signalDays: 2, // the days just before onset used to measure each metric's early signal
+  quietDays: 7, // an illness starts after at least a week of feeling fine
+  factorRange: [0.5, 2], // a metric's personal weight stays within half to double its research weight
+};
+
+const BODY_ALERT = 1.0; // body signals alone at Watch level or above
+
+const addDays = (date, n) => new Date(toT(date) + n * dayMs).toISOString().slice(0, 10);
+
+/** Runs of days you reported feeling unwell, each starting after a week of feeling fine. */
+export function illnessEpisodes(checkins) {
+  const sickDates = Object.keys(checkins).filter((d) => selfSick(checkins[d])).sort();
+  const episodes = [];
+  let current = null;
+  for (const d of sickDates) {
+    if (current && toT(d) - toT(current.end) <= 2 * dayMs) {
+      current.end = d; // one fine day in between still counts as the same illness
+      current.days++;
+      continue;
+    }
+    // A new run: only an onset if no sick day in the week before.
+    const quiet = !sickDates.some((x) => x < d && toT(d) - toT(x) <= LEARNING.quietDays * dayMs);
+    current = { onset: d, end: d, days: 1, counted: quiet };
+    episodes.push(current);
+  }
+  return episodes.filter((e) => e.counted).map(({ counted, ...e }) => e);
+}
+
+/**
+ * Track record and personal weights from per-day results of assess().
+ * Body-signal alerts use physical signals only, so feeling unwell can't count as its own warning.
+ */
+export function learn(results, checkins) {
+  const byDate = Object.fromEntries(results.map((r) => [r.date, r]));
+  const episodes = illnessEpisodes(checkins);
+  const bodyAlert = (r) => r && r.ready && r.phys + r.persist >= BODY_ALERT;
+
+  // Caught or missed: any body alert in the lead window up to and including onset day.
+  const judged = [];
+  for (const ep of episodes) {
+    let lead = null;
+    for (let k = LEARNING.leadDays; k >= 0; k--) {
+      if (bodyAlert(byDate[addDays(ep.onset, -k)])) {
+        lead = k;
+        break;
+      }
+    }
+    const hasData = [...Array(LEARNING.leadDays + 1)].some((_, k) => byDate[addDays(ep.onset, -k)]?.ready);
+    judged.push({ ...ep, caught: lead != null, leadDays: lead, hasData });
+  }
+
+  // False alarms: body alerts not near an illness, judged only when you checked in over the next 3 days.
+  let alerts = 0;
+  let falseAlarms = 0;
+  for (const r of results) {
+    if (!bodyAlert(r)) continue;
+    const near = episodes.some((ep) => r.date >= addDays(ep.onset, -LEARNING.leadDays) && r.date <= ep.end);
+    if (near) {
+      alerts++;
+      continue;
+    }
+    const after = [0, 1, 2, 3].map((k) => checkins[addDays(r.date, k)]).filter(Boolean);
+    if (after.length < 2) continue; // not enough check-ins to know
+    alerts++;
+    if (!after.some(selfSick)) falseAlarms++;
+  }
+
+  // Personal signal per metric: how far it moved the wrong way just before onset, compared with healthy days.
+  const usable = judged.filter((e) => e.hasData);
+  const sickNear = new Set();
+  for (const ep of episodes) {
+    for (let d = addDays(ep.onset, -LEARNING.leadDays - 1); d <= addDays(ep.end, 2); d = addDays(d, 1)) sickNear.add(d);
+  }
+  const signals = {};
+  for (const key of Object.keys(METRICS)) {
+    const pre = [];
+    for (const ep of usable) {
+      const vals = [...Array(LEARNING.signalDays)].map((_, k) => byDate[addDays(ep.onset, -(k + 1))]?.z?.[key]?.zBad).filter((v) => v != null);
+      if (vals.length) pre.push(Math.max(...vals));
+    }
+    const healthy = results.filter((r) => r.checkin && !selfSick(r.checkin) && !sickNear.has(r.date)).map((r) => r.z?.[key]?.zBad).filter((v) => v != null);
+    const mean = (a) => (a.length ? a.reduce((x, y) => x + y, 0) / a.length : null);
+    signals[key] = { pre: mean(pre), healthy: mean(healthy), episodes: pre.length };
+  }
+
+  const influence = usable.length >= LEARNING.minEpisodes
+    ? Math.min(LEARNING.maxInfluence, LEARNING.influencePerEpisode * (usable.length - LEARNING.minEpisodes + 1))
+    : 0;
+
+  // Blend: research weight × (1 − influence) + personal weight × influence, keeping the total the same.
+  const research = Object.fromEntries(Object.entries(METRICS).map(([k, m]) => [k, m.weight]));
+  let weights = { ...research };
+  if (influence > 0) {
+    const lifts = Object.fromEntries(Object.entries(signals).map(([k, sg]) =>
+      [k, sg.pre == null ? null : Math.max(0, sg.pre - (sg.healthy ?? 0))]));
+    const known = Object.values(lifts).filter((v) => v != null);
+    const avgLift = known.length ? known.reduce((a, b) => a + b, 0) / known.length : 0;
+    const [lo, hi] = LEARNING.factorRange;
+    const blended = {};
+    for (const [k, base] of Object.entries(research)) {
+      const factor = lifts[k] == null ? 1 : Math.min(hi, Math.max(lo, (lifts[k] + 0.25) / (avgLift + 0.25)));
+      blended[k] = base * (1 - influence) + base * factor * influence;
+    }
+    // Rebalance only among metrics with data, so their total stays the same and
+    // metrics this watch doesn't send keep exactly their research weight.
+    const active = Object.keys(blended).filter((k) => lifts[k] != null);
+    const sum = (obj) => active.reduce((a, k) => a + obj[k], 0);
+    const scale = sum(blended) ? sum(research) / sum(blended) : 1;
+    weights = Object.fromEntries(Object.entries(blended).map(([k, v]) => [k, active.includes(k) ? v * scale : research[k]]));
+  }
+
+  const caught = judged.filter((e) => e.caught && e.hasData);
+  return {
+    episodes: judged,
+    record: {
+      illnesses: judged.length,
+      withData: usable.length,
+      caught: caught.length,
+      avgLeadDays: caught.length ? caught.reduce((a, e) => a + e.leadDays, 0) / caught.length : null,
+      alerts,
+      falseAlarms,
+    },
+    signals,
+    influence,
+    research,
+    weights,
+    minEpisodes: LEARNING.minEpisodes,
+  };
 }
