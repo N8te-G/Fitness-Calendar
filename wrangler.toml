@@ -26,7 +26,7 @@ new_sqlite_classes = ["Store"]
 # While this is empty the /api routes refuse every request, so no data is public.
 ACCESS_TEAM_DOMAIN = "nathan-groves.cloudflareaccess.com"
 # Optional: the Access application's "Application Audience (AUD) Tag".
-ACCESS_AUD = ""
+ACCESS_AUD = "ad63b889f703f464e82315a8380ad1a568dc63ff4ed76e8e39ada82d393be565"
 # Optional: comma-separated emails allowed to see data (Access policy already limits this).
 ALLOWED_EMAILS = ""
 
