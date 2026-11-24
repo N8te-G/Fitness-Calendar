@@ -3,11 +3,14 @@
 //   checkin:YYYY-MM-DD  -> { feeling, symptoms, note, savedAt }
 //   meta                -> { lastSync, syncedFrom, syncedTo, errors, fields }
 //   token               -> cached Garmin bearer token
+//   vapid               -> push signing key pair
+//   push:<id>           -> { endpoint, time: "HH:MM", tz, origin, lastSentDate }
 
 import { DurableObject } from "cloudflare:workers";
 import { Garmin, GarminError } from "./garmin.js";
 import { assess, BASELINE_DAYS, METRICS, SYMPTOMS, LEVELS } from "./model.js";
 import { mockMetrics } from "./mock.js";
+import { vapidKeys, sendPush, localNow, isDue } from "./push.js";
 
 const HISTORY_DAYS = BASELINE_DAYS + 30; // enough for a full baseline plus a month of results
 const CHUNK_DAYS = 28;
@@ -44,6 +47,8 @@ export class Store extends DurableObject {
         await this.ctx.storage.delete(`checkin:${date}`);
         return json(await this.state(url.searchParams.get("today") || date));
       }
+      if (url.pathname.startsWith("/reminder")) return json(await this.reminder(url.pathname, request));
+      if (url.pathname === "/cron" && request.method === "POST") return json(await this.sendDueReminders());
       return json({ error: "not_found", message: "Unknown route." }, 404);
     } catch (err) {
       return json({ error: err.code || "error", message: err.message }, err.status || 500);
@@ -106,6 +111,77 @@ export class Store extends DurableObject {
     });
   }
 
+  // ---------- morning reminder ----------
+
+  async reminder(path, request) {
+    const storage = this.ctx.storage;
+    const keys = await vapidKeys(storage);
+    if (path === "/reminder/key") return { publicKey: keys.publicKey };
+    if (request.method !== "POST") throw httpError(405, "method", "Use POST.");
+    const body = await request.json().catch(() => ({}));
+    const endpoint = String(body.endpoint || "");
+    if (!/^https:\/\/[^\s]+$/.test(endpoint) || endpoint.length > 2000) throw httpError(400, "endpoint", "Bad push endpoint.");
+    const key = `push:${await sha(endpoint)}`;
+
+    if (path === "/reminder/status") {
+      const sub = await storage.get(key);
+      return { publicKey: keys.publicKey, reminder: sub ? { time: sub.time, tz: sub.tz } : null };
+    }
+    if (path === "/reminder/save") {
+      const time = String(body.time || "");
+      if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(time)) throw httpError(400, "time", "Time must be HH:MM.");
+      const tz = String(body.tz || "UTC");
+      try {
+        localNow(tz);
+      } catch {
+        throw httpError(400, "tz", "Unknown time zone.");
+      }
+      const prev = await storage.get(key);
+      const origin = request.headers.get("X-App-Origin") || "https://example.invalid";
+      // If the reminder time today has already passed, don't fire straight away.
+      const now = localNow(tz);
+      const [h, m] = time.split(":").map(Number);
+      const lastSentDate = prev?.lastSentDate || (now.minutes >= h * 60 + m ? now.date : null);
+      await storage.put(key, { endpoint, time, tz, origin, lastSentDate });
+      return { reminder: { time, tz } };
+    }
+    if (path === "/reminder/delete") {
+      await storage.delete(key);
+      return { reminder: null };
+    }
+    if (path === "/reminder/test") {
+      const sub = await storage.get(key);
+      if (!sub) throw httpError(404, "no_reminder", "Turn the reminder on first.");
+      const status = await sendPush(keys, sub.endpoint, sub.origin);
+      if (status >= 400) throw httpError(502, "push", `The browser's push service refused the message (${status}).`);
+      return { sent: true };
+    }
+    throw httpError(404, "not_found", "Unknown reminder route.");
+  }
+
+  async sendDueReminders() {
+    const storage = this.ctx.storage;
+    const subs = await storage.list({ prefix: "push:" });
+    if (!subs.size) return { sent: 0 };
+    const keys = await vapidKeys(storage);
+    let sent = 0;
+    for (const [key, sub] of subs) {
+      const now = localNow(sub.tz);
+      if (!isDue(sub, now)) continue;
+      if (await storage.get(`checkin:${now.date}`)) {
+        await storage.put(key, { ...sub, lastSentDate: now.date }); // already checked in today
+        continue;
+      }
+      const status = await sendPush(keys, sub.endpoint, sub.origin).catch(() => 0);
+      if (status === 404 || status === 410) await storage.delete(key); // phone unsubscribed
+      else if (status >= 200 && status < 300) {
+        await storage.put(key, { ...sub, lastSentDate: now.date });
+        sent++;
+      }
+    }
+    return { sent };
+  }
+
   async saveCheckin(body) {
     const date = body?.date;
     if (!isDate(date)) throw Object.assign(new Error("Bad date."), { status: 400, code: "date" });
@@ -147,6 +223,15 @@ export class Store extends DurableObject {
       mock: this.env.MOCK === "1",
     };
   }
+}
+
+function httpError(status, code, message) {
+  return Object.assign(new Error(message), { status, code });
+}
+
+async function sha(text) {
+  const d = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
+  return [...new Uint8Array(d)].slice(0, 16).map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
 function nonEmpty(obj) {

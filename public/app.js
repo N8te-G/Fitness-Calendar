@@ -366,5 +366,97 @@ $("checkin-form").addEventListener("submit", async (e) => {
   }
 });
 
+// ---------- morning reminder ----------
+const pushSupported = "serviceWorker" in navigator && "PushManager" in window && "Notification" in window;
+let swReg = null;
+
+function b64ToBytes(s) {
+  const b = atob(s.replace(/-/g, "+").replace(/_/g, "/") + "=".repeat((4 - (s.length % 4)) % 4));
+  return Uint8Array.from(b, (c) => c.charCodeAt(0));
+}
+
+const post = (path, body) => api(path, { method: "POST", headers: HEADERS, body: JSON.stringify(body) });
+
+function showReminder(reminder) {
+  $("reminder-on").textContent = reminder ? "Save time" : "Turn on";
+  $("reminder-off").hidden = !reminder;
+  $("reminder-test").hidden = !reminder;
+  $("reminder-state").textContent = reminder ? `On · ${reminder.time} each day` : "Off";
+  if (reminder) $("reminder-time").value = reminder.time;
+}
+
+async function initReminder() {
+  if (!pushSupported) {
+    $("reminder-text").textContent = "This browser can't receive notifications. On Android, open the app in Chrome.";
+    $("reminder-on").disabled = true;
+    return;
+  }
+  try {
+    swReg = await navigator.serviceWorker.register("/sw.js");
+    const sub = await swReg.pushManager.getSubscription();
+    if (!sub) return showReminder(null);
+    const { reminder } = await post("/api/reminder/status", { endpoint: sub.endpoint });
+    showReminder(reminder);
+  } catch (err) {
+    $("reminder-msg").textContent = `Reminder settings unavailable: ${err.message}`;
+  }
+}
+
+$("reminder-on").addEventListener("click", async () => {
+  const msg = $("reminder-msg");
+  msg.textContent = "";
+  try {
+    if (Notification.permission === "denied") {
+      msg.textContent = "Notifications are blocked for this site. Allow them in Chrome's site settings, then try again.";
+      return;
+    }
+    if ((await Notification.requestPermission()) !== "granted") {
+      msg.textContent = "Notifications weren't allowed, so the reminder is off.";
+      return;
+    }
+    swReg ||= await navigator.serviceWorker.register("/sw.js");
+    await navigator.serviceWorker.ready;
+    let sub = await swReg.pushManager.getSubscription();
+    if (!sub) {
+      const { publicKey } = await api("/api/reminder/key");
+      sub = await swReg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64ToBytes(publicKey) });
+    }
+    const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+    const { reminder } = await post("/api/reminder/save", { endpoint: sub.endpoint, time: $("reminder-time").value, tz });
+    showReminder(reminder);
+    msg.textContent = `Reminder set for ${reminder.time}. It only arrives if you haven't checked in.`;
+  } catch (err) {
+    msg.textContent = `Couldn't turn on the reminder: ${err.message}`;
+  }
+});
+
+$("reminder-test").addEventListener("click", async () => {
+  const msg = $("reminder-msg");
+  try {
+    const sub = await swReg?.pushManager.getSubscription();
+    if (!sub) return showReminder(null);
+    await post("/api/reminder/test", { endpoint: sub.endpoint });
+    msg.textContent = "Test sent. It should appear within a few seconds.";
+  } catch (err) {
+    msg.textContent = `Test failed: ${err.message}`;
+  }
+});
+
+$("reminder-off").addEventListener("click", async () => {
+  const msg = $("reminder-msg");
+  try {
+    const sub = await swReg?.pushManager.getSubscription();
+    if (sub) {
+      await post("/api/reminder/delete", { endpoint: sub.endpoint });
+      await sub.unsubscribe();
+    }
+    showReminder(null);
+    msg.textContent = "Reminder turned off.";
+  } catch (err) {
+    msg.textContent = `Couldn't turn it off: ${err.message}`;
+  }
+});
+
 document.body.classList.add("no-state");
 load();
+initReminder();

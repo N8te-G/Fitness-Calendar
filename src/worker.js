@@ -20,10 +20,12 @@ export default {
           throw new HttpError(403, "csrf", "Missing request header.");
         }
       }
-      const route = url.pathname.slice(4); // "/state", "/checkin"
-      if (!["/state", "/checkin"].includes(route)) throw new HttpError(404, "not_found", "Unknown API route.");
-      const stub = env.STORE.get(env.STORE.idFromName("owner"));
-      return await stub.fetch(new Request(`https://store${route}${url.search}`, request));
+      const route = url.pathname.slice(4); // "/state", "/checkin", "/reminder/..."
+      const routes = ["/state", "/checkin", "/reminder/key", "/reminder/status", "/reminder/save", "/reminder/delete", "/reminder/test"];
+      if (!routes.includes(route)) throw new HttpError(404, "not_found", "Unknown API route.");
+      const forwarded = new Request(`https://store${route}${url.search}`, request);
+      forwarded.headers.set("X-App-Origin", url.origin);
+      return await store(env).fetch(forwarded);
     } catch (err) {
       const status = err instanceof HttpError ? err.status : 500;
       return new Response(JSON.stringify({ error: err.code || "error", message: err.message }), {
@@ -32,7 +34,14 @@ export default {
       });
     }
   },
+
+  // Every 15 minutes: send any morning check-in reminders that are due.
+  async scheduled(event, env, ctx) {
+    ctx.waitUntil(store(env).fetch("https://store/cron", { method: "POST" }));
+  },
 };
+
+const store = (env) => env.STORE.get(env.STORE.idFromName("owner"));
 
 class HttpError extends Error {
   constructor(status, code, message) {
