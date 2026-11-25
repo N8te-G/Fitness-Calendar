@@ -155,13 +155,17 @@ function renderDataCheck() {
   const fields = Object.entries(state.fields || {})
     .map(([src, names]) => `<p class="dc-fields"><b>${esc(src)}:</b> ${esc(names.join(", "))}</p>`)
     .join("");
+  const trainDays = recent.filter((d) => d.metrics?.trainingLoad > 0).length;
+  const trainingRow = `<tr><td>Training load <small>(context, not scored)</small></td><td class="${trainDays ? "dc-ok" : "dc-miss"}">${
+    trainDays ? `${trainDays} workout day${trainDays === 1 ? "" : "s"} of ${recent.length}` : "no workouts received"
+  }</td></tr>`;
   const bb = todayEntry()?.metrics?.bbInfo;
   const bbLine = bb
     ? `<p class="dc-fields"><b>Overnight Body Battery, last night:</b> sleep ${esc(bb.sleep)}, ${bb.readings} readings during sleep. ${
         bb.reason === "ok" ? `Calculated from ${esc(bb.source || "readings")}.` : `Not calculated: ${esc(bb.reason)}.`
       }</p>`
     : `<p class="dc-fields"><b>Overnight Body Battery, last night:</b> no sleep record from Garmin yet.</p>`;
-  $("datacheck").innerHTML = `<table class="dc-table"><tbody>${rows}</tbody></table>${bbLine}
+  $("datacheck").innerHTML = `<table class="dc-table"><tbody>${rows}${trainingRow}</tbody></table>${bbLine}
     ${fields ? `<p class="dc-fields">Field names Garmin returned (no values):</p>${fields}` : ""}`;
 }
 
@@ -271,6 +275,23 @@ function renderCheckin() {
 
 const fmtNum = (v, digits) => v.toFixed(digits).replace(/^-(0\.?0*)$/, "$1");
 
+/** Yesterday's training against your usual, and whether it changed this morning's score. */
+function trainingLine(d) {
+  const i = state.days.findIndex((x) => x.date === d.date);
+  const prev = state.days[i - 1];
+  const recent = state.days.slice(Math.max(0, i - 60), i).map((x) => x.metrics?.trainingLoad).filter((v) => v > 0).sort((a, b) => a - b);
+  if (!recent.length) return `<p class="training-line">Training load: no workouts from Garmin in the last 60 days.</p>`;
+  const typical = recent[Math.floor(recent.length / 2)];
+  const load = prev?.metrics?.trainingLoad;
+  const effect = d.training?.damp < 1
+    ? `Heart rate and HRV count ${Math.round(d.training.damp * 100)}% this morning.`
+    : "No adjustment this morning.";
+  const what = load > 0
+    ? `Yesterday's training load ${Math.round(load)}${prev.metrics.trainingTop ? ` (${esc(prev.metrics.trainingTop)})` : ""}, against your usual ${Math.round(typical)} on a training day.`
+    : `No workout yesterday. Your usual training-day load is ${Math.round(typical)}.`;
+  return `<p class="training-line">${what} ${load > 0 ? effect : ""}</p>`;
+}
+
 function renderBaseline() {
   const d = todayEntry();
   // Hide metrics this watch has never sent; the Data check still lists them.
@@ -290,7 +311,7 @@ function renderBaseline() {
       <div class="gauge">${gauge(m.bad, e.z)}</div>
     </div>`;
   });
-  $("baseline").innerHTML = rows.join("");
+  $("baseline").innerHTML = rows.join("") + trainingLine(d);
 }
 
 function gauge(bad, z) {
