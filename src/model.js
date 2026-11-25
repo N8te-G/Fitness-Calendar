@@ -50,17 +50,24 @@ export function levelFor(score) {
   return out.key;
 }
 
-export function selfScore(checkin) {
-  if (!checkin) return 0;
+/** How you feel, split into the rating and the symptoms (capped at 2.2 in total). */
+export function selfParts(checkin) {
+  if (!checkin) return { rating: 0, symptoms: 0 };
   const f = Number(checkin.feeling);
-  let s = 0;
-  if (f === 1) s += 1.4;
-  else if (f === 2) s += 0.8;
-  else if (f === 3) s += 0.15;
-  const n = (checkin.symptoms || []).filter((k) => k in SYMPTOMS).length;
-  s += Math.min(1.4, n * 0.35);
-  if ((checkin.symptoms || []).includes("fever")) s += 0.4;
-  return Math.min(2.2, s);
+  const rating = f === 1 ? 1.4 : f === 2 ? 0.8 : f === 3 ? 0.15 : 0;
+  const listed = (checkin.symptoms || []).filter((k) => k in SYMPTOMS);
+  let symptoms = Math.min(1.4, listed.length * 0.35) + (listed.includes("fever") ? 0.4 : 0);
+  const total = rating + symptoms;
+  if (total > 2.2) {
+    const k = 2.2 / total;
+    return { rating: rating * k, symptoms: symptoms * k };
+  }
+  return { rating, symptoms };
+}
+
+export function selfScore(checkin) {
+  const p = selfParts(checkin);
+  return p.rating + p.symptoms;
 }
 
 export function selfSick(checkin) {
@@ -138,7 +145,7 @@ export function assess(days, checkins = {}, weights = null) {
       .sort((a, b) => w(b[0]) * b[1].zBad - w(a[0]) * a[1].zBad)
       .map(([key, e]) => ({ key, value: e.value, median: e.median, sd: e.sd, z: e.z }));
 
-    out.push({ date, metrics, checkin, z, phys, persist, self, score, level, reasons, ready });
+    out.push({ date, metrics, checkin, z, phys, persist, self, selfParts: selfParts(checkin), score, level, reasons, ready });
 
     if (selfSick(checkin) || level === "elevated" || level === "high") excluded.add(date);
     prevPhys = phys;

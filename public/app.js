@@ -207,7 +207,9 @@ function renderVerdict() {
       <div class="meter-wrap"><div class="meter-track">${segs}</div><div class="meter-mark" style="left:${pos}%"></div></div>
       <div class="meter-labels"><span>Normal</span><span>Watch</span><span>Elevated</span><span>High</span></div>
     </div>
-    <div class="score-line">Score ${d.score.toFixed(1)} = body signals ${(d.phys + d.persist).toFixed(1)} + how you feel ${d.self.toFixed(1)}</div>`}
+    <div class="score-line">Score ${d.score.toFixed(1)} = body signals ${(d.phys + d.persist).toFixed(1)} + how you feel ${d.self.toFixed(1)}${
+      d.self > 0 ? ` (rating ${d.selfParts.rating.toFixed(1)}${d.selfParts.symptoms > 0 ? ` + symptoms ${d.selfParts.symptoms.toFixed(1)}` : ""})` : ""
+    }</div>`}
     ${reasons.length ? `<ul class="reasons">${reasons.join("")}</ul>` : ""}`;
 }
 
@@ -251,6 +253,7 @@ function renderCheckin() {
       $("checkin-note").value = existing.note || "";
     }
     $("checkin-cancel").hidden = !existing;
+    $("checkin-delete").hidden = !existing;
     $("checkin-msg").textContent = "";
   }
 }
@@ -388,6 +391,26 @@ $("checkin-date").addEventListener("change", (e) => {
   renderCheckin();
 });
 $("checkin-cancel").addEventListener("click", () => { editing = false; renderCheckin(); });
+$("checkin-delete").addEventListener("click", async () => {
+  const btn = $("checkin-delete");
+  // Two taps: the first asks for confirmation.
+  if (btn.dataset.confirm !== checkinDate) {
+    btn.dataset.confirm = checkinDate;
+    btn.textContent = "Tap again to remove";
+    setTimeout(() => { btn.dataset.confirm = ""; btn.textContent = "Remove check-in"; }, 4000);
+    return;
+  }
+  btn.dataset.confirm = "";
+  btn.textContent = "Remove check-in";
+  try {
+    state = await api(`/api/checkin?date=${checkinDate}&today=${today}`, { method: "DELETE", headers: HEADERS });
+    editing = false;
+    render();
+    $("checkin-msg").textContent = "Check-in removed.";
+  } catch (err) {
+    $("checkin-msg").textContent = `Not removed: ${err.message}`;
+  }
+});
 $("checkin-form").addEventListener("submit", async (e) => {
   e.preventDefault();
   const form = e.target;

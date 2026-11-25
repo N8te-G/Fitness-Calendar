@@ -41,6 +41,8 @@
 }
 
 * { box-sizing: border-box; }
+/* Elements hidden from script stay hidden even when a class gives them a display. */
+[hidden] { display: none !important; }
 html { -webkit-text-size-adjust: 100%; }
 body {
   margin: 0; background: var(--bg); color: var(--fg);
@@ -171,6 +173,10 @@ textarea {
 .primary { background: var(--accent); color: var(--accent-fg); }
 .primary:disabled { opacity: 0.5; cursor: default; }
 .ghost { background: transparent; color: var(--accent); }
+.link-danger {
+  border: 0; background: none; color: var(--high); font-size: 0.85rem; text-decoration: underline;
+  cursor: pointer; padding: 9px 4px;
+}
 .form-msg { font-size: 0.85rem; color: var(--muted); }
 .checkin-summary { display: flex; gap: 12px; align-items: center; justify-content: space-between; flex-wrap: wrap; }
 .checkin-summary p { margin: 0; }
