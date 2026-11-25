@@ -155,7 +155,13 @@ function renderDataCheck() {
   const fields = Object.entries(state.fields || {})
     .map(([src, names]) => `<p class="dc-fields"><b>${esc(src)}:</b> ${esc(names.join(", "))}</p>`)
     .join("");
-  $("datacheck").innerHTML = `<table class="dc-table"><tbody>${rows}</tbody></table>
+  const bb = todayEntry()?.metrics?.bbInfo;
+  const bbLine = bb
+    ? `<p class="dc-fields"><b>Overnight Body Battery, last night:</b> sleep ${esc(bb.sleep)}, ${bb.readings} readings during sleep${
+        bb.firstGapMin != null ? ` (first ${bb.firstGapMin} min after falling asleep, last ${bb.lastGapMin} min before waking)` : ""
+      }. ${bb.reason === "ok" ? "Calculated." : `Not calculated: ${esc(bb.reason)}.`}</p>`
+    : `<p class="dc-fields"><b>Overnight Body Battery, last night:</b> no sleep record from Garmin yet.</p>`;
+  $("datacheck").innerHTML = `<table class="dc-table"><tbody>${rows}</tbody></table>${bbLine}
     ${fields ? `<p class="dc-fields">Field names Garmin returned (no values):</p>${fields}` : ""}`;
 }
 

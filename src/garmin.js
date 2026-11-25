@@ -223,9 +223,9 @@ export function extract(raw) {
     const start = epochMs(dto.sleepStartTimestampGMT ?? s.sleepStartTimestampGMT);
     const end = epochMs(dto.sleepEndTimestampGMT ?? s.sleepEndTimestampGMT);
     if (!d || start == null || end == null || end <= start) continue;
-    const a = levelNear(bbPoints, start);
-    const b = levelNear(bbPoints, end);
-    if (a != null && b != null) set(d, "bbOvernight", b - a);
+    const result = overnightChange(bbPoints, start, end);
+    if (result.value != null) set(d, "bbOvernight", result.value);
+    (days[d] ||= {}).bbInfo = result.info; // shown in the Data check
   }
 
   // Training load per day (the sum of that day's workouts), and the biggest workout's name.
@@ -283,14 +283,29 @@ export function bodyBatteryPoints(report) {
   return out;
 }
 
-/** The level at the reading closest to time t, if one is within 45 minutes. */
-function levelNear(points, t) {
-  let best = null;
-  for (const [ts, level] of points) {
-    const gap = Math.abs(ts - t);
-    if (gap <= 45 * 60000 && (!best || gap < best.gap)) best = { gap, level };
-  }
-  return best ? best.level : null;
+const MIN = 60000;
+// Readings may start up to 2 hours after you fall asleep (watch still charging, say)
+// and end up to 1 hour before you wake.
+const START_SLACK = 120 * MIN;
+const END_SLACK = 60 * MIN;
+
+/**
+ * Overnight Body Battery change: the last reading during sleep minus the first.
+ * Returns { value, info } where info explains the result for the Data check.
+ */
+export function overnightChange(points, start, end) {
+  const clock = (t) => new Date(t).toISOString().slice(11, 16);
+  const inside = points.filter(([ts]) => ts >= start - 15 * MIN && ts <= end + 15 * MIN);
+  const info = { sleep: `${clock(start)}–${clock(end)} GMT`, readings: inside.length };
+  if (!points.length) return { value: null, info: { ...info, reason: "no Body Battery readings downloaded" } };
+  if (!inside.length) return { value: null, info: { ...info, reason: "no Body Battery readings during sleep" } };
+  const [firstTs, firstLevel] = inside[0];
+  const [lastTs, lastLevel] = inside[inside.length - 1];
+  info.firstGapMin = Math.max(0, Math.round((firstTs - start) / MIN));
+  info.lastGapMin = Math.max(0, Math.round((end - lastTs) / MIN));
+  if (firstTs - start > START_SLACK) return { value: null, info: { ...info, reason: `readings start ${info.firstGapMin} min after you fell asleep` } };
+  if (end - lastTs > END_SLACK) return { value: null, info: { ...info, reason: `readings stop ${info.lastGapMin} min before you woke` } };
+  return { value: lastLevel - firstLevel, info: { ...info, reason: "ok" } };
 }
 
 function epochMs(v) {
