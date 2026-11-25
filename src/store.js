@@ -17,7 +17,7 @@ const HISTORY_DAYS = BASELINE_DAYS + 30; // enough for a full baseline plus a mo
 const CHUNK_DAYS = 27;
 const RESYNC_MINUTES = 30;
 // Bump when the way Garmin data is read changes, so stored history is re-downloaded.
-const EXTRACT_VERSION = 6;
+const EXTRACT_VERSION = 8;
 const RECENT_REFETCH_DAYS = 3; // Garmin fills in last night's data during the morning
 
 
