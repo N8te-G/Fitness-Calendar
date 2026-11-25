@@ -8,14 +8,18 @@
 // This is a heuristic early-warning signal, not a medical diagnosis.
 
 export const METRICS = {
-  hrv: { label: "Overnight HRV", unit: "ms", bad: -1, weight: 0.5, floor: 3, relFloor: 0.07, digits: 0 },
-  rhr: { label: "Resting heart rate", unit: "bpm", bad: 1, weight: 0.35, floor: 2, digits: 0 },
+  hrv: { label: "Overnight HRV", unit: "ms", bad: -1, weight: 0.5, floor: 3, relFloor: 0.07, digits: 0, exercise: true },
+  rhr: { label: "Resting heart rate", unit: "bpm", bad: 1, weight: 0.35, floor: 2, digits: 0, exercise: true },
+  // Overlaps with resting HR, so it carries less weight on its own.
+  sleepHr: { label: "Overnight average heart rate", unit: "bpm", bad: 1, weight: 0.2, floor: 1.5, digits: 0, exercise: true },
   skinTemp: { label: "Skin temperature change", unit: "°C", bad: 1, weight: 0.3, floor: 0.2, digits: 1 },
   resp: { label: "Sleep breathing rate", unit: "brpm", bad: 1, weight: 0.25, floor: 0.4, digits: 1 },
   spo2: { label: "Sleep SpO2", unit: "%", bad: -1, weight: 0.15, floor: 1, digits: 0 },
   sleepScore: { label: "Sleep score", unit: "", bad: -1, weight: 0.15, floor: 4, digits: 0 },
   bbCharged: { label: "Overnight Body Battery charge", unit: "", bad: -1, weight: 0.1, floor: 5, digits: 0 },
   stress: { label: "Average stress", unit: "", bad: 1, weight: 0.1, floor: 3, digits: 0 },
+  restless: { label: "Restless moments", unit: "", bad: 1, weight: 0.08, floor: 2, digits: 0 },
+  wakes: { label: "Times awake", unit: "", bad: 1, weight: 0.07, floor: 1, digits: 0 },
 };
 
 export const SYMPTOMS = {
@@ -34,6 +38,9 @@ export const MIN_BASELINE = 14;
 const Z_CAP = 4;
 // Deviations inside half an SD are ordinary night-to-night noise and score nothing.
 const DEAD_ZONE = 0.5;
+// Hard training lowers HRV and raises heart rate the next morning, like early illness does.
+// After an unusually hard day, exercise-sensitive metrics count for less.
+export const TRAINING = { hard: 2, moderate: 1.5, hardDamp: 0.6, moderateDamp: 0.8, absoluteHard: 200, minDays: 5 };
 // A metric is listed as a reason once it is this many SDs the wrong way.
 const REASON_Z = 1.5;
 
@@ -84,6 +91,30 @@ const dayMs = 86400000;
 const toT = (d) => Date.parse(d + "T00:00:00Z");
 
 /**
+ * How hard the previous day's training was compared with your typical training day.
+ * damp < 1 means exercise-sensitive metrics count for less this morning.
+ */
+function trainingContext(sorted, i, t) {
+  const prev = sorted[i - 1];
+  const none = { load: null, typical: null, damp: 1, name: null };
+  if (!prev || t - toT(prev.date) !== dayMs) return none;
+  const load = prev.metrics?.trainingLoad;
+  if (typeof load !== "number" || load <= 0) return none;
+  const loads = [];
+  for (let j = i - 1; j >= 0 && t - toT(sorted[j].date) <= BASELINE_DAYS * dayMs; j--) {
+    const v = sorted[j].metrics?.trainingLoad;
+    if (typeof v === "number" && v > 0) loads.push(v);
+  }
+  loads.sort((a, b) => a - b);
+  const typical = loads.length >= TRAINING.minDays ? median(loads) : null;
+  const ratio = typical ? load / typical : null;
+  let damp = 1;
+  if ((ratio != null && ratio >= TRAINING.hard) || (typical == null && load >= TRAINING.absoluteHard)) damp = TRAINING.hardDamp;
+  else if (ratio != null && ratio >= TRAINING.moderate) damp = TRAINING.moderateDamp;
+  return { load, typical, damp, name: prev.metrics?.trainingTop || null };
+}
+
+/**
  * @param {Array<{date:string, metrics:object}>} days  any order; one entry per date
  * @param {Record<string, object>} checkins  by date
  * @param {Record<string, number>} [weights]  per-metric weights; defaults to the research weights
@@ -100,6 +131,7 @@ export function assess(days, checkins = {}, weights = null) {
   for (let i = 0; i < sorted.length; i++) {
     const { date, metrics = {} } = sorted[i];
     const t = toT(date);
+    const training = trainingContext(sorted, i, t);
     const checkin = checkins[date] || null;
     const z = {};
     let phys = 0;
@@ -126,7 +158,7 @@ export function assess(days, checkins = {}, weights = null) {
         if (entry.value != null) {
           entry.z = (entry.value - med) / sd;
           entry.zBad = Math.min(Z_CAP, Math.max(0, entry.z * cfg.bad - DEAD_ZONE));
-          phys += w(key) * entry.zBad;
+          phys += w(key) * entry.zBad * (cfg.exercise ? training.damp : 1);
         }
         if (key === "hrv") ready = true;
       }
@@ -145,7 +177,7 @@ export function assess(days, checkins = {}, weights = null) {
       .sort((a, b) => w(b[0]) * b[1].zBad - w(a[0]) * a[1].zBad)
       .map(([key, e]) => ({ key, value: e.value, median: e.median, sd: e.sd, z: e.z }));
 
-    out.push({ date, metrics, checkin, z, phys, persist, self, selfParts: selfParts(checkin), score, level, reasons, ready });
+    out.push({ date, metrics, checkin, z, phys, persist, self, selfParts: selfParts(checkin), score, level, reasons, ready, training });
 
     if (selfSick(checkin) || level === "elevated" || level === "high") excluded.add(date);
     prevPhys = phys;

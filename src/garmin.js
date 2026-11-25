@@ -76,6 +76,18 @@ export class Garmin {
         this.get("/wellness-service/wellness/bodyBattery/reports/daily", { startDate: start, endDate: end }),
       stress: () => this.get(`/usersummary-service/stats/stress/daily/${start}/${end}`),
       summaries: () => this.get("/usersummary-service/v2/dailysummaries", { startDate: start, endDate: end }),
+      activities: async () => {
+        const all = [];
+        for (let offset = 0; offset < 300; offset += 100) {
+          const page = await this.get("/activitylist-service/activities/search/activities", {
+            start: offset, limit: 100, startDate: start, endDate: end,
+          });
+          const list = Array.isArray(page) ? page : page?.activityList || page?.activities || [];
+          all.push(...list);
+          if (list.length < 100) break;
+        }
+        return all;
+      },
     };
   }
 
@@ -188,6 +200,9 @@ export function extract(raw) {
     set(d, "rhr", num(s.restingHeartRate ?? dto.restingHeartRate));
     set(d, "sleepSeconds", num(dto.sleepTimeSeconds ?? dto.totalSleepSeconds));
     set(d, "spo2", findSpo2(s));
+    set(d, "sleepHr", num(dto.avgHeartRate ?? s.avgHeartRate ?? dto.averageHeartRate));
+    set(d, "wakes", num(dto.awakeCount ?? s.awakeCount));
+    set(d, "restless", deepFind(s, ["restlessMomentsCount", "restlessMoments", "restlessCount"]));
     set(d, "skinTemp", findSkinTemp(s));
     // Overnight Body Battery gain, as shown on Garmin's sleep screen.
     set(d, "bbOvernight", deepFind(s, ["bodyBatteryChange", "bodyBatteryChangeValue"]));
@@ -211,6 +226,24 @@ export function extract(raw) {
     const a = levelNear(bbPoints, start);
     const b = levelNear(bbPoints, end);
     if (a != null && b != null) set(d, "bbOvernight", b - a);
+  }
+
+  // Training load per day (the sum of that day's workouts), and the biggest workout's name.
+  const byDay = {};
+  for (const a of Array.isArray(raw.activities) ? raw.activities : []) {
+    const d = String(a.startTimeLocal || "").slice(0, 10);
+    const load = num(a.activityTrainingLoad ?? a.trainingLoad);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(d) || load == null || load <= 0) continue;
+    const day = (byDay[d] ||= { total: 0, top: null, topLoad: 0 });
+    day.total += load;
+    if (load > day.topLoad) {
+      day.topLoad = load;
+      day.top = String(a.activityName || a.activityType?.typeKey || "Workout").slice(0, 60);
+    }
+  }
+  for (const [d, v] of Object.entries(byDay)) {
+    set(d, "trainingLoad", Math.round(v.total));
+    (days[d] ||= {}).trainingTop = v.top;
   }
 
   for (const s of rows(raw.stress)) {
