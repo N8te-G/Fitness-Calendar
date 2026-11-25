@@ -197,6 +197,11 @@ function renderVerdict() {
     reasons.push(`<li>You reported feeling ${esc(FEELINGS[d.checkin.feeling].toLowerCase())}${sy.length ? `, with ${esc(sy.join(", "))}` : ""}</li>`);
   }
   if (d.persist) reasons.push(`<li>Body signals have been off two days running</li>`);
+  if (d.training?.damp < 1) {
+    const tr = d.training;
+    const vs = tr.typical ? ` against your usual ${Math.round(tr.typical)}` : "";
+    reasons.push(`<li class="context">Hard training yesterday${tr.name ? ` (${esc(tr.name)})` : ""}: load ${Math.round(tr.load)}${vs}. Heart rate and HRV count ${Math.round(tr.damp * 100)}% this morning, since hard exercise moves them too.</li>`);
+  }
 
   el.innerHTML = `
     <div class="eyebrow">Illness risk · ${esc(dayLabel(d.date))}</div>

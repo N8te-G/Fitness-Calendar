@@ -5,7 +5,7 @@
   "scripts": {
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
-    "test": "node test/access.test.mjs && node test/push.test.mjs && node test/learning.test.mjs"
+    "test": "node test/access.test.mjs && node test/push.test.mjs && node test/learning.test.mjs && node test/training.test.mjs"
   },
   "devDependencies": {
     "wrangler": "4.156.0"

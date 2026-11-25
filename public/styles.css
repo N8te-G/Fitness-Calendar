@@ -126,6 +126,7 @@ h1 { font: 700 1.35rem/1.1 var(--font-display); margin: 0; letter-spacing: -0.01
 .score-line { font-size: 0.82rem; color: var(--muted); }
 .reasons { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
 .reasons li { display: flex; gap: 8px; align-items: baseline; font-size: 0.9rem; }
+.reasons li.context::before { background: var(--muted); }
 .reasons li::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--lc); flex: none; transform: translateY(-1px); }
 
 /* Panels */
