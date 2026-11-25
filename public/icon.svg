@@ -1,1 +1,33 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96"><rect width="96" height="96" rx="22" fill="#176b5b"/><path d="M18 51h15l7.5-18 12 33 9-21H78" fill="none" stroke="#fff" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/></svg>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#A4F2D4"/>
+      <stop offset="0.45" stop-color="#2DBEB3"/>
+      <stop offset="1" stop-color="#7B43DA"/>
+    </linearGradient>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="8" dy="14" stdDeviation="12" flood-color="#082636" flood-opacity="0.3"/>
+    </filter>
+  </defs>
+  <rect width="1024" height="1024" rx="230" fill="url(#bg)"/>
+
+  <!-- Echoes: tinted copies of the face, offset down-right -->
+  <circle cx="582" cy="582" r="258" fill="#E6FFF8" opacity="0.18"/>
+  <circle cx="548" cy="548" r="258" fill="#E6FFF8" opacity="0.22"/>
+  <g fill="none" stroke-linecap="round" stroke-linejoin="round" stroke-width="64" transform="translate(34 34)" opacity="0.45">
+    <path d="M 330 512 H 410 L 455 412 L 525 602 L 570 492 H 640 C 700 492 735 520 736 570 A 228 228 0 0 1 530 739" stroke="#CFF6EE"/>
+  </g>
+
+  <g filter="url(#shadow)" fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <!-- White half of the watch face -->
+    <path d="M 470 288 A 228 228 0 0 0 470 736" stroke="#FFFFFF" stroke-width="74"/>
+    <!-- One continuous navy trace: heartbeat that turns into the other half of the face -->
+    <path d="M 330 512 H 410 L 455 412 L 525 602 L 570 492 H 640 C 700 492 735 520 736 570 A 228 228 0 0 1 530 739" stroke="#1C1C4A" stroke-width="64"/>
+  </g>
+
+  <!-- Early-warning dot in the open corner -->
+  <g filter="url(#shadow)">
+    <circle cx="668" cy="318" r="54" fill="#FFFFFF"/>
+    <circle cx="668" cy="318" r="24" fill="#FF6B7A"/>
+  </g>
+</svg>
