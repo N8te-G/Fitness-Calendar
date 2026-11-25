@@ -27,7 +27,6 @@ export function mockMetrics(start, end) {
       bbOvernight: Math.round(62 + n() * 16 - sick * 12),
       stress: Math.round(27 + n() * 8 + sick * 5),
       spo2: Math.round(96 + n() * 1.2 - sick * 1.5),
-      spo2Low: Math.round(91 + n() * 2.5 - sick * 2),
       sleepHr: Math.round(60 + n() * 3 + sick * 4),
       wakes: Math.max(0, Math.round(2 + n() * 2 + sick)),
       restless: Math.max(0, Math.round(10 + n() * 6 + sick * 5)),

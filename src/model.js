@@ -15,7 +15,6 @@ export const METRICS = {
   skinTemp: { label: "Skin temperature change", unit: "°C", bad: 1, weight: 0.3, floor: 0.2, digits: 1 },
   resp: { label: "Sleep breathing rate", unit: "brpm", bad: 1, weight: 0.25, floor: 0.4, digits: 1 },
   spo2: { label: "Sleep SpO2", unit: "%", bad: -1, weight: 0.15, floor: 1, digits: 0 },
-  spo2Low: { label: "Lowest SpO2 overnight", unit: "%", bad: -1, weight: 0.1, floor: 1.5, digits: 0 },
   sleepScore: { label: "Sleep score", unit: "", bad: -1, weight: 0.15, floor: 4, digits: 0 },
   bbCharged: { label: "Overnight Body Battery charge", unit: "", bad: -1, weight: 0.1, floor: 5, digits: 0 },
   stress: { label: "Average stress", unit: "", bad: 1, weight: 0.1, floor: 3, digits: 0 },

@@ -200,7 +200,6 @@ export function extract(raw) {
     set(d, "rhr", num(s.restingHeartRate ?? dto.restingHeartRate));
     set(d, "sleepSeconds", num(dto.sleepTimeSeconds ?? dto.totalSleepSeconds));
     set(d, "spo2", findSpo2(s));
-    set(d, "spo2Low", num(dto.lowestSpO2Value ?? s.lowestSpO2Value));
     set(d, "sleepHr", num(dto.avgHeartRate ?? s.avgHeartRate ?? dto.averageHeartRate));
     set(d, "wakes", num(dto.awakeCount ?? s.awakeCount));
     set(d, "restless", deepFind(s, ["restlessMomentsCount", "restlessMoments", "restlessCount"]));
