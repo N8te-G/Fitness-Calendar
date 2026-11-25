@@ -209,10 +209,12 @@ export function extract(raw) {
   }
 
   const bbPoints = [];
+  const bbSleepEvents = [];
   for (const b of rows(raw.bodyBattery)) {
     // Whole-day charge: only used for completed days when no overnight figure exists.
     set(dateOf(b), "bbDaily", num(b.charged ?? b.bodyBatteryChargedValue));
     bbPoints.push(...bodyBatteryPoints(b));
+    bbSleepEvents.push(...sleepEvents(b));
   }
 
   // Overnight Body Battery change = level when you woke minus level when you fell asleep.
@@ -223,7 +225,7 @@ export function extract(raw) {
     const start = epochMs(dto.sleepStartTimestampGMT ?? s.sleepStartTimestampGMT);
     const end = epochMs(dto.sleepEndTimestampGMT ?? s.sleepEndTimestampGMT);
     if (!d || start == null || end == null || end <= start) continue;
-    const result = overnightChange(bbPoints, start, end);
+    const result = overnightChange(bbPoints, start, end, bbSleepEvents);
     if (result.value != null) set(d, "bbOvernight", result.value);
     (days[d] ||= {}).bbInfo = result.info; // shown in the Data check
   }
@@ -284,28 +286,72 @@ export function bodyBatteryPoints(report) {
 }
 
 const MIN = 60000;
-// Readings may start up to 2 hours after you fall asleep (watch still charging, say)
-// and end up to 1 hour before you wake.
-const START_SLACK = 120 * MIN;
-const END_SLACK = 60 * MIN;
+// Garmin's daily report holds only a few readings, so levels at bedtime and wake-up are
+// interpolated between the readings either side, if they are no more than 4 hours apart.
+const MAX_BRIDGE = 4 * 60 * MIN;
+const NEAR = 45 * MIN;
+
+/** Sleep events from a Body Battery report: { start, end, impact }. */
+export function sleepEvents(report) {
+  const events = [];
+  const walkEvents = (v) => {
+    if (Array.isArray(v)) return v.forEach(walkEvents);
+    if (!v || typeof v !== "object") return;
+    if (/sleep/i.test(String(v.eventType || "")) && num(v.bodyBatteryImpact) != null) {
+      const start = epochMs(v.eventStartTimeGmt ?? v.eventStartTimeGMT);
+      const dur = num(v.durationInMilliseconds);
+      if (start != null) events.push({ start, end: dur ? start + dur : start, impact: num(v.bodyBatteryImpact) });
+    }
+    for (const child of Object.values(v)) if (child && typeof child === "object") walkEvents(child);
+  };
+  walkEvents(report.bodyBatteryActivityEvent ?? report.bodyBatteryActivityEventList ?? report);
+  return events;
+}
+
+/** Body Battery level at time t: a reading close by, or interpolated between readings either side. */
+export function levelAt(points, t) {
+  let before = null;
+  let after = null;
+  for (const p of points) {
+    if (p[0] <= t && (!before || p[0] > before[0])) before = p;
+    if (p[0] >= t && (!after || p[0] < after[0])) after = p;
+  }
+  if (before && after) {
+    if (before[0] === after[0]) return before[1];
+    if (after[0] - before[0] <= MAX_BRIDGE) {
+      return before[1] + ((after[1] - before[1]) * (t - before[0])) / (after[0] - before[0]);
+    }
+  }
+  const near = [before, after].filter((p) => p && Math.abs(p[0] - t) <= NEAR).sort((x, y) => Math.abs(x[0] - t) - Math.abs(y[0] - t));
+  return near.length ? near[0][1] : null;
+}
 
 /**
- * Overnight Body Battery change: the last reading during sleep minus the first.
+ * Overnight Body Battery change. Prefers Garmin's own sleep event (its "Body Battery
+ * change" for the night); otherwise the level at waking minus the level at falling asleep.
  * Returns { value, info } where info explains the result for the Data check.
  */
-export function overnightChange(points, start, end) {
+export function overnightChange(points, start, end, events = []) {
   const clock = (t) => new Date(t).toISOString().slice(11, 16);
-  const inside = points.filter(([ts]) => ts >= start - 15 * MIN && ts <= end + 15 * MIN);
+  const inside = points.filter(([ts]) => ts >= start && ts <= end);
   const info = { sleep: `${clock(start)}–${clock(end)} GMT`, readings: inside.length };
+
+  // Garmin's sleep event that overlaps this sleep the most.
+  let best = null;
+  for (const e of events) {
+    const overlap = Math.min(e.end, end) - Math.max(e.start, start);
+    if (overlap > 0 && (!best || overlap > best.overlap)) best = { ...e, overlap };
+  }
+  if (best && best.overlap >= 0.5 * (end - start)) {
+    return { value: best.impact, info: { ...info, source: "Garmin's sleep event", reason: "ok" } };
+  }
+
   if (!points.length) return { value: null, info: { ...info, reason: "no Body Battery readings downloaded" } };
-  if (!inside.length) return { value: null, info: { ...info, reason: "no Body Battery readings during sleep" } };
-  const [firstTs, firstLevel] = inside[0];
-  const [lastTs, lastLevel] = inside[inside.length - 1];
-  info.firstGapMin = Math.max(0, Math.round((firstTs - start) / MIN));
-  info.lastGapMin = Math.max(0, Math.round((end - lastTs) / MIN));
-  if (firstTs - start > START_SLACK) return { value: null, info: { ...info, reason: `readings start ${info.firstGapMin} min after you fell asleep` } };
-  if (end - lastTs > END_SLACK) return { value: null, info: { ...info, reason: `readings stop ${info.lastGapMin} min before you woke` } };
-  return { value: lastLevel - firstLevel, info: { ...info, reason: "ok" } };
+  const a = levelAt(points, start);
+  const b = levelAt(points, end);
+  if (a == null) return { value: null, info: { ...info, reason: "no Body Battery readings close enough to when you fell asleep" } };
+  if (b == null) return { value: null, info: { ...info, reason: "no Body Battery readings close enough to when you woke" } };
+  return { value: Math.round(b - a), info: { ...info, source: "Body Battery readings", reason: "ok" } };
 }
 
 function epochMs(v) {
