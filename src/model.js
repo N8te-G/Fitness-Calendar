@@ -61,7 +61,8 @@ export function levelFor(score) {
 export function selfParts(checkin) {
   if (!checkin) return { rating: 0, symptoms: 0 };
   const f = Number(checkin.feeling);
-  const rating = f === 1 ? 1.4 : f === 2 ? 0.8 : f === 3 ? 0.15 : 0;
+  // Only feeling unwell (1) or below par (2) adds to the score; 3 Okay and above are neutral.
+  const rating = f === 1 ? 1.4 : f === 2 ? 0.8 : 0;
   const listed = (checkin.symptoms || []).filter((k) => k in SYMPTOMS);
   let symptoms = Math.min(1.4, listed.length * 0.35) + (listed.includes("fever") ? 0.4 : 0);
   const total = rating + symptoms;
